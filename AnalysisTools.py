@@ -5,11 +5,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.spatial.distance import cdist, pdist, squareform
-from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 import seaborn as sns
 import util
+
+file = "Development"
 
 class Ana:
     def __init__(self):
@@ -17,22 +19,20 @@ class Ana:
         Initializes the Ana class with a base folder for data storage.
         """
         self.datasets = {}
-        # self.results = {}
-        # self.mode_for_learningRate = {}
         self.cndbTools = cndbTools()
         self.outPath = os.path.join(os.getcwd(), 'Analysis')
-        os.makedirs(f'{os.path.join(os.getcwd(), 'Analysis')}')
+        os.makedirs(f'{os.path.join(os.getcwd(), 'Analysis')}', exist_ok=True)
 
-        
-    def FullInversion_lr(self, filename):
-        """
-        Reads error data from a file and prints the error array, learning rate array, and mode.
-        
-        Args:
-            filename (str): The path to the file containing error data.
-        """
-        error_array, lr_array, mode = util.get_error_data(filename)
-        print(error_array, lr_array, mode)
+    if file != "Development":
+        def FullInversion_lr(self, filename):
+            """
+            Reads error data from a file and prints the error array, learning rate array, and mode.
+            
+            Args:
+                filename (str): The path to the file containing error data.
+            """
+            error_array, lr_array, mode = util.get_error_data(filename)
+            print(error_array, lr_array, mode)
 
     def add_dataset(self, label, folder):
         """
@@ -60,6 +60,7 @@ class Ana:
             show (bool, optional): Whether to show the plot. Default is True.
             figsize (int, optional): Size of the figure. Default is 10.
         """
+        # check if a string (filename) is passed if so retrieve the hic data from the function else use the array passed onto HiCMapPlot
         if isinstance(hic_sim, str):
             hic_sim, _, __ = util.getHiCData_simulation(hic_sim)
         if isinstance(hic_exp, str):
@@ -144,44 +145,52 @@ class Ana:
         return
    
 
-    def process_trajectories(self, label, filename, num_replicas=0):
+    def process_trajectories(self, label, filename, folder_pattern=['iteration_', [0,100]]):
         """
         Processes trajectory data for a given dataset.
         
         Args:
-            label (str): The label for the dataset.
-            filename (str): The filename of the trajectory data (.cndb file).
+            label (str, required): The label for the dataset.
+            filename (str, required): The filename of the trajectory data (.cndb file).
             num_replicas (int): the number of iterations done on the simulations makes it easier if the directory holding your simulation data is
             folder/{}_0, folder/{}_1 .. folder/{}_{num_replicas}
+            file_pattern (array: [filepattern name, [iteration start, iteration end]], required)
+
             
             * If 0 is given as the paramater for num_replicas then it will try and load a single .cndb trajectory file
         """
         config = self.datasets[label]
         trajs_xyz = []
+        it_start = folder_pattern[1][0]
+        it_end = folder_pattern[1][1]
+
+                    
+        inputFolder = os.path.join(config['folder'], folder_pattern[0])
         
-        if num_replicas == 0:
-            traj = self.load_and_process_trajectory(folder=config['folder'], replica=0, filename=filename)
+        
+        if it_start == it_end:                                    #### RIGHT HERE
+            traj = self.__load_and_process_trajectory(folder=inputFolder, replica=it_start, filename=filename)
             if traj.size > 0:
                 self.datasets[label]['trajectories'] = np.vstack(traj)
                 print(f'Trajectory for {label} has shape {self.trajectories[label].shape}')
             else:
-                print(f"No valid trajectories found for {label} at the file {os.path.join(config['folder'], filename)}")
+                print(f"No valid trajectories found for {label} at the file {inputFolder}{it_start}/{filename}")
 
             
-        for i in range(0, num_replicas + 1):
-            traj = self.load_and_process_trajectory(
-                folder=config['folder'], replica=i, filename=filename
+        for i in range(it_start, it_end + 1):
+            traj = self.__load_and_process_trajectory(
+                folder=inputFolder, replica=i, filename=filename
             )
             if traj.size > 0:
                 trajs_xyz.append(traj)
         
         if trajs_xyz:
             self.datasets[label]['trajectories'] = np.vstack(trajs_xyz) # Store the traj_xyz data in the label given
-            print(f'Trajectory for {label} has shape {self.trajectories[label].shape}')
+            print(f'Trajectory for {label} has shape {self.datasets[label]["trajectories"].shape}')
         else:
             print(f"No valid trajectories found for {label}")
 
-    def load_and_process_trajectory(self, folder, replica, filename, key=None):
+    def __load_and_process_trajectory(self, folder, replica, filename, key=None):
         """
         Loads and processes a single trajectory file.
         
@@ -194,7 +203,7 @@ class Ana:
         Returns:
             np.array: Processed trajectory data.
         """
-        path = os.path.join(folder, f'iteration_{replica}/{filename}')
+        path = f'{folder}{replica}/{filename}'
         
         if not os.path.exists(path):
             print(f"File does not exist: {path}")
@@ -218,7 +227,7 @@ class Ana:
     """====================================================================== CLUSTERING ===================================================================================="""
     
     
-    def create_dendogram(self, outputFileName='dendogram.png', show=True, _clusterOnly=False, **args):
+    def create_dendogram(self,*args, outputFileName='dendogram.png', show=True, _clusterOnly=False):
         """
             Args:
                 show (boolean, optional): whether to show the dendogram
@@ -236,14 +245,21 @@ class Ana:
             print("No arguements given")
             return
         flat_euclid_dist_map = {}
+        
+        #! NEED TO FIX 
         for label in args:
+            print(f'processing {label}')
             trajectories = self.datasets[label]['trajectories']
-            if trajectories == None:
+            if trajectories.all() == None:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return
             #compute pairwise euclid distances
             flat_euclid_dist_map[label] = [cdist(val, val, 'euclidean') for val in trajectories]
-            self.datasets[label]["distance_array"] = np.array(flat_euclid_dist_map) 
+            flat_euclid_dist_map[label] = np.array(flat_euclid_dist_map[label])
+            
+            # Store in datasets label 
+            self.datasets[label]["distance_array"] = flat_euclid_dist_map[label] 
+            
             size = flat_euclid_dist_map[label].shape[0]
             flat_euclid_dist_map[label] = np.array(flat_euclid_dist_map[label][:size])
             
@@ -254,15 +270,19 @@ class Ana:
                                         for val in range(len(flat_euclid_dist_map[label]))]
         # make it into a 1D vertical array
         X = np.vstack([np.concatenate(flat_euclid_dist_map[label]) for label in args])
-        print(f"X has shape: {X.shape}")
+        print(X)
+        
+        print(f"vertical array has shape: {X.shape}")
         
         # Create the linkage matrix
-        linkage_matrix = linkage(X, method="weighted")
+        linkage_matrix = linkage(X, method="weighted", metric='euclidean')
+        
         if _clusterOnly:
             return X, linkage_matrix
         
         plt.figure(figsize=(10, 7))
-        dendrogram(linkage_matrix, labels=[f"{label}_{i}" for label in args for i in range(len(flat_euclid_dist_map[label]))])
+        # dendrogram(linkage_matrix, labels=[f"{label}" for label in args for i in range(len(flat_euclid_dist_map[label]))])
+        dendrogram(linkage_matrix)
         
         # plot the dendogram
         plt.title("Dendrogram")
@@ -278,9 +298,9 @@ class Ana:
             outputFileName (filepath, optional): name to save plot as
         """
         # if not already defined compute the distance
-        if self.datasets[label]["distance_array"] == None:
+        if self.datasets[label]["distance_array"].all() == None:
             trajectories = self.datasets[label]['trajectories']
-            if trajectories == None:
+            if trajectories.all() == None:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return
             compute_dist = [cdist(val, val, 'euclidean') for val in trajectories]
