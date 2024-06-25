@@ -169,3 +169,4 @@ def get_error_data(error_file):
     # return np.array(errors_log), np.array(lr_log), mode_for_learningRate[-1]
     return np.array(errors_log), np.array(lr_log)
     
+    

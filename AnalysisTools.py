@@ -225,90 +225,89 @@ class Ana:
             return np.array([])
         
     """====================================================================== CLUSTERING ===================================================================================="""
-    
-    
-    def create_dendogram(self,*args, outputFileName='dendogram.png', show=True, _clusterOnly=False):
+
+    def create_dendogram(self, *args, outputFileName='dendogram.png', show=True, _clusterOnly=False, k_offset=500, metric='euclidean'):
         """
-            Args:
-                show (boolean, optional): whether to show the dendogram
-                outputFileName (filepath, optional): name to save plot as
-                _clusterOnly (boolean, dont use): used by cluster function to get the cluster threshold
-                **args: (strings, required): the labels to create the dendogram from
-                
-                
-            Usage Example: create_dendogram('
-                                        outputFileName=dendogram.png', show=True, 
-            **args the labels ->        'compartment', 'subcompartment', 'homopolymer')
+        Args:
+            show (boolean, required): whether to show the dendogram
+            outputFileName (filepath, optional): name to save plot as
+            k_offset (int, required): the offset parameter for flattening the distance matrices. Defaults to 500.
+            metric (str, required): the distance metric to use for computing pairwise distances. Defaults to 'euclidean'.
+            _clusterOnly (boolean, dont use): used by cluster function to get the cluster threshold
+            **args: (strings, required): the labels to create the dendogram from
+            
+        Usage Example: create_dendogram('
+                                    outputFileName=dendogram.png', show=True, k_offset=500, method='euclidean'
+        **args the labels ->        'compartment', 'subcompartment', 'homopolymer')
         """
-        k_offset = 500
+        
         if len(args) == 0:
-            print("No arguements given")
+            print("No arguments given")
             return
+        
         flat_euclid_dist_map = {}
         
-        #! NEED TO FIX 
         for label in args:
             print(f'processing {label}')
             trajectories = self.datasets[label]['trajectories']
-            if trajectories.all() == None:
+            if trajectories is None or len(trajectories) == 0:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return
-            #compute pairwise euclid distances
-            flat_euclid_dist_map[label] = [cdist(val, val, 'euclidean') for val in trajectories]
-            flat_euclid_dist_map[label] = np.array(flat_euclid_dist_map[label])
+            # Compute pairwise Euclidean distances
+            dist = [cdist(val, val, 'euclidean') for val in trajectories]
+            dist = np.array(dist)
+            print(f"{label} has dist shape {dist.shape}")
             
             # Store in datasets label 
-            self.datasets[label]["distance_array"] = flat_euclid_dist_map[label] 
-            
-            size = flat_euclid_dist_map[label].shape[0]
-            flat_euclid_dist_map[label] = np.array(flat_euclid_dist_map[label][:size])
-            
-            print(f"{label} has shape: {flat_euclid_dist_map[label].shape}")
-            
-            # flatten the distance arrays
-            flat_euclid_dist_map[label] = [flat_euclid_dist_map[label][val][np.triu_indices_from(flat_euclid_dist_map[label][val], k=k_offset)].flatten()
-                                        for val in range(len(flat_euclid_dist_map[label]))]
-        # make it into a 1D vertical array
-        X = np.vstack([np.concatenate(flat_euclid_dist_map[label]) for label in args])
-        print(X)
+            self.datasets[label]["distance_array"] = dist
+            flat_euclid_dist_map[label] = dist
         
-        print(f"vertical array has shape: {X.shape}")
+        # Flatten the distance arrays
+        flat_euclid_dist_map = {label: [flat_euclid_dist_map[label][val][np.triu_indices_from(flat_euclid_dist_map[label][val], k=k_offset)].flatten()
+                                        for val in range(len(flat_euclid_dist_map[label]))]
+                                for label in args}
+        
+        # Make it into a 1D vertical array
+        X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
+        print(f"Flattened distance array has shape: {X.shape}")
         
         # Create the linkage matrix
-        linkage_matrix = linkage(X, method="weighted", metric='euclidean')
+        Z = linkage(X, method="weighted", metric=metric)
         
         if _clusterOnly:
-            return X, linkage_matrix
+            return X, Z
         
         plt.figure(figsize=(10, 7))
-        # dendrogram(linkage_matrix, labels=[f"{label}" for label in args for i in range(len(flat_euclid_dist_map[label]))])
-        dendrogram(linkage_matrix)
+        dn = dendrogram(Z)
         
-        # plot the dendogram
+        # Plot the dendogram
         plt.title("Dendrogram")
         plt.savefig(os.path.join(self.outPath, outputFileName))
         if show:
-            plt.show() 
+            plt.show()
+
         
-    def create_euclidian_dist_map(self, label, show=True, outputFileName="euclid_dist.png"):
+    def create_euclidian_dist_map(self, label, show=True, outputFileName="euclid_dist.png", cmap='viridis_r'):
         """
         Args:
             label (string): label of the dataset to create the euclidian_dist_plot
             show (boolean, optional): whether to show the dendogram
-            outputFileName (filepath, optional): name to save plot as
+            outputFileName (filepath, optional): name to save plot as'
         """
         # if not already defined compute the distance
-        if self.datasets[label]["distance_array"].all() == None:
-            trajectories = self.datasets[label]['trajectories']
-            if trajectories.all() == None:
+        trajectories = self.datasets[label]['trajectories']
+
+        if len(trajectories) == 0:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return
+            
+        if len(self.datasets[label]["distance_array"])== 0:
             compute_dist = [cdist(val, val, 'euclidean') for val in trajectories]
             compute_dist = np.array(compute_dist)
             self.datasets[label]['distance_array'] = compute_dist
         
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        p = ax.imshow(self.datasets[label]['distance_array'][0], vmin=0, vmax=25, cmap="viridis_r")
+        p = ax.imshow(self.datasets[label]['distance_array'][0], vmin=0, vmax=25, cmap=cmap)
         plt.colorbar(p, ax=ax, fraction=0.046)
         plt.title(f'Euclidean Distance Map {label}')
         plt.xlabel('Point Index')
@@ -321,35 +320,62 @@ class Ana:
         if show:
             plt.show()
         
-    def PCA_plot(self, outputFileName, outputPlotName='dendogram.png', show=True, *args):
+    def PCA_plot(self, *args, outputFileName="PCA", outputPlotName='dendogram.png', show=True):
         """
-            Args:
-                show (boolean, optional): whether to show the cluster plot
-                outputPlotName (filename, optional): name to save plot as
-                outputFileName (filename, required): name to save data as
-                **args: (strings, required): the labels to create the cluster from
-                
-                
-            Usage Example: PCA_plot('
-                                        outputFileName=dendogram.png', show=True, 
-            **args the labels ->        'compartment', 'subcompartment', 'homopolymer')
+        Args:
+            show (boolean, optional): Whether to show the cluster plot. Defaults to True.
+            outputPlotName (str, optional): Name to save the plot as. Defaults to 'dendogram.png'.
+            outputFileName (str, required): Name to save data as.
+            **args: (strings, required): The labels to create the cluster from.
+            
+        Usage Example:
+            PCA_plot('compartment', 'subcompartment', 'homopolymer', outputFileName='output.csv', show=True)
         """
         num_clusters = len(args)
-        flattened_distance_array, linkage_matrix = self.create_dendogram(show=False,_clusterOnly=True, *args)
-        threshold=linkage_matrix[-(num_clusters), 2]
+        flattened_distance_array, linkage_matrix = self.create_dendogram(show=False, _clusterOnly=True, *args)
+        threshold = linkage_matrix[-num_clusters, 2]
         print(f"Threshold for {num_clusters} clusters: {threshold}")
         fclust = fcluster(linkage_matrix, t=threshold, criterion='distance')
-        print(f"Cluster Assignment: {fclust}")
-        np.savetxt(os.path.join(self.outPath, f"fclust_{outputFileName}"))
+        print(f"Cluster assignments: {fclust}")
+        np.savetxt(os.path.join(self.outPath, f"fclust_{outputFileName}.txt"), fclust)
         
         pca = PCA(n_components=2)
         principalComponents = pca.fit_transform(flattened_distance_array)
         principalDF = pd.DataFrame(data=principalComponents, columns=['PC1', 'PC2'])
-        principalDF.to_csv(os.path.join(self.outPath, f'balance_paca_{outputFileName}'))
+        principalDF.to_csv(os.path.join(self.outPath, f'balance_pca_{outputFileName}.csv'))
         print(f"PCA explained variance ratio: {pca.explained_variance_ratio_}")
         
-        ### ! NEED TO CONTINUE FINISHING
-        
-        return
-        
-             
+        # Plot the PCA results
+        cmap = 'viridis'
+        marker_size = 2
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        scatter = ax.scatter(principalDF["PC1"], principalDF["PC2"], c=fclust, alpha=0.5, cmap=cmap, s=marker_size)
+        ax.set_xlabel('PC1')
+        ax.set_ylabel('PC2')
+        ticks = np.arange(1, num_clusters + 1)
+        cbar = plt.colorbar(scatter)
+        cbar.set_ticks(ticks)
+        plt.savefig(os.path.join(self.outPath, f'PCAs_{outputPlotName}.pdf'))
+        if show:
+            plt.show()
+        plt.close()
+
+        sizes = {label: self.datasets[label]['distance_array'].shape[0] for label in args}
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+        start = 0
+        colors = ['tab:orange', 'tab:green', 'tab:red']
+        for idx, label in enumerate(args):
+            end = start + sizes[label]
+            scatter = ax.scatter(principalDF["PC1"][start:end], principalDF["PC2"][start:end], alpha=0.5, c=colors[idx], label=label, s=marker_size)
+            start = end
+        ax.set_xlabel('PC1')
+        ax.set_ylabel('PC2')
+        plt.legend(bbox_to_anchor=(0., 1.01, 1., .1), 
+                loc='lower left',
+                ncol=1, 
+                borderaxespad=0.,
+                frameon=False)
+        plt.savefig(os.path.join(self.outPath, f'PCAs_{outputPlotName}_per_ensemble.pdf'))
+        if show:
+            plt.show()
+        plt.close()
