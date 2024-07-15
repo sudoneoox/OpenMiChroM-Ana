@@ -344,7 +344,8 @@ class Ana:
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         
         try:
-            cached_data = np.load(cache_file, allow_pickle=True)
+            cached_data = np.load(cache_file + ".npz", allow_pickle=True)
+            print(f"using cached data: {cache_file}.npz")
             return cached_data['X'], cached_data['Z']
         except FileNotFoundError:
             print(f"No cached data, creating cache file {cache_file}")
