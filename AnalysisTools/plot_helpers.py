@@ -1,15 +1,13 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.cluster import SpectralClustering
-from sklearn.neighbors import NearestNeighbors
-from scipy.sparse import csgraph
-from scipy.sparse.linalg import eigsh
 import seaborn as sns
 from scipy.cluster import hierarchy
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
-from kneed import KneeLocator
+from sklearn.metrics import silhouette_samples
+
+import AnalysisTools.compute_helpers as compute_helpers
+
 
 class PlotHelper:
     """
@@ -167,60 +165,6 @@ class PlotHelper:
         print(f"Min distance: {np.min(data[0]):.4f}, Max distance: {np.max(data[0]):.4f}")
         self._save_and_show(params)
 
-    def _find_optimal_clusters(self, data):
-        """
-        Find the optimal number of clusters.
-
-        Args:
-            data (np.ndarray): Data points matrix.
-
-        Returns:
-            int: Optimal number of clusters.
-        """
-        max_clusters = self.default_params['max_clusters']
-        inertias = []
-        silhouette_scores = []
-
-        print(f"Finding optimal number of clusters (max: {max_clusters})...")
-        for k in range(2, max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(data)
-            inertias.append(kmeans.inertia_)
-            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
-            print(f"  Clusters: {k}, Inertia: {kmeans.inertia_:.2f}, Silhouette Score: {silhouette_scores[-1]:.4f}")
-
-        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
-        optimal_clusters = kl.elbow
-
-        if optimal_clusters is None:
-            optimal_clusters = silhouette_scores.index(max(silhouette_scores)) + 2
-            print(f"Elbow method failed. Using highest silhouette score.")
-        else:
-            print(f"Elbow method found optimal clusters at {optimal_clusters}")
-
-        print(f"Optimal number of clusters: {optimal_clusters}")
-        return optimal_clusters
-
-    def _evaluate_clustering(self, data, labels):
-        """
-        Evaluate clustering quality.
-
-        Args:
-            data (np.ndarray): Data points matrix.
-            labels (np.ndarray): Cluster labels.
-
-        Returns:
-            None
-        """
-
-        silhouette = silhouette_score(data, labels)
-        calinski_harabasz = calinski_harabasz_score(data, labels)
-        davies_bouldin = davies_bouldin_score(data, labels)
-        
-        print("\nClustering Evaluation Metrics:")
-        print(f"  Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
-        print(f"  Calinski-Harabasz Index: {calinski_harabasz:.4f} (higher is better)")
-        print(f"  Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
 
     def _dimensionality_reduction_plot(self, data, params, n_components):
         """
@@ -236,12 +180,12 @@ class PlotHelper:
         """
         res, fclust = data
         
-        n_clusters = self._find_optimal_clusters(res)
+        n_clusters = compute_helpers.find_optimal_clusters(res)
         
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         cluster_labels = kmeans.fit_predict(res)
 
-        self._evaluate_clustering(res, cluster_labels)
+        compute_helpers.evaluate_clustering(res, cluster_labels)
 
         fig = plt.figure(figsize=params['figsize'])
         
@@ -335,34 +279,41 @@ class PlotHelper:
         print(f"Number of components: {n_components}")
         self._dimensionality_reduction_plot(data, params, n_components)
         
-    def _spectralclusteringplot(self, data, params):
+ 
+    def _ivisplot(self, data, params):
         """
-        Create a comprehensive spectral clustering plot.
+        Create an ivis plot.
 
         Args:
-            data (list): [X, n_clusters] where X is the data matrix and n_clusters is the number of clusters.
+            data (list): [ivis_results, cluster_labels]
             params (dict): Plotting parameters.
 
         Returns:
             None
         """
-        X, n_clusters = data
-        print(f"\nPerforming Spectral Clustering with {n_clusters} clusters...")
+        n_components = params.get('embedding_dims', 2)
+        print("\nivis Plot:")
+        print(f"Number of components: {n_components}")
+        self._dimensionality_reduction_plot(data, params, n_components)
+        
+ 
+    def _spectralclusteringplot(self, data, cluster_results, params):
+        """
+        Create a comprehensive spectral clustering plot.
 
-        # Compute affinity matrix
-        n_neighbors = min(15, X.shape[0] - 1)
-        connectivity = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean').fit(X).kneighbors_graph()
-        affinity_matrix = 0.5 * (connectivity + connectivity.T)
+        Args:
+            data (np.array): The original data.
+            cluster_results (tuple): Results from spectral_clustering method.
+            params (dict): Plotting parameters.
 
-        # Perform spectral clustering
-        sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=42)
-        cluster_labels = sc.fit_predict(affinity_matrix)
+        Returns:
+            None
+        """
+        (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, 
+         silhouette_avg, calinski_harabasz, davies_bouldin) = cluster_results
+        
+        n_clusters = len(np.unique(cluster_labels))
 
-        # Compute Laplacian and its eigenvectors
-        laplacian = csgraph.laplacian(affinity_matrix, normed=True)
-        eigenvalues, eigenvectors = eigsh(laplacian, k=n_clusters, which='SM')
-
-        # Create the main figure
         fig = plt.figure(figsize=(20, 15))
         gs = fig.add_gridspec(3, 3)
 
@@ -375,7 +326,7 @@ class PlotHelper:
 
         # Plot original data with clustering results
         ax2 = fig.add_subplot(gs[0, 1])
-        ax2.scatter(X[:, 0], X[:, 1], c=cluster_labels, cmap='viridis')
+        ax2.scatter(data[:, 0], data[:, 1], c=cluster_labels, cmap='viridis')
         ax2.set_title('Clustered Data')
         ax2.set_xlabel('Feature 1')
         ax2.set_ylabel('Feature 2')
@@ -387,27 +338,9 @@ class PlotHelper:
         ax3.set_xlabel('Index')
         ax3.set_ylabel('Eigenvalue')
 
-        # Compute and plot silhouette scores
-        silhouette_avg = silhouette_score(X, cluster_labels)
-        sample_silhouette_values = silhouette_score(X, cluster_labels, metric='euclidean')
+        # Plot silhouette
         ax4 = fig.add_subplot(gs[1, 0])
-        ax4.set_xlim([-1, 1])
-        ax4.set_ylim([0, len(X) + (n_clusters + 1) * 10])
-        y_lower = 10
-        for i in range(n_clusters):
-            ith_cluster_silhouette_values = sample_silhouette_values[cluster_labels == i]
-            ith_cluster_silhouette_values.sort()
-            size_cluster_i = ith_cluster_silhouette_values.shape[0]
-            y_upper = y_lower + size_cluster_i
-            color = plt.cm.nipy_spectral(float(i) / n_clusters)
-            ax4.fill_betweenx(np.arange(y_lower, y_upper), 0, ith_cluster_silhouette_values,
-                              facecolor=color, edgecolor=color, alpha=0.7)
-            y_lower = y_upper + 10
-        ax4.set_title("Silhouette plot for the various clusters")
-        ax4.set_xlabel("Silhouette coefficient values")
-        ax4.set_ylabel("Cluster label")
-        ax4.axvline(x=silhouette_avg, color="red", linestyle="--")
-        ax4.set_yticks([])  # Clear the yaxis labels / ticks
+        self._plot_silhouette(ax4, data, cluster_labels, n_clusters, silhouette_avg)
 
         # Plot affinity matrix
         ax5 = fig.add_subplot(gs[1, 1])
@@ -423,10 +356,7 @@ class PlotHelper:
         ax6.set_xlabel('Data point index')
         ax6.set_ylabel('Eigenvector value')
 
-        # Compute and display metrics
-        calinski_harabasz = calinski_harabasz_score(X, cluster_labels)
-        davies_bouldin = davies_bouldin_score(X, cluster_labels)
-
+        # Display metrics
         metrics_text = (f"Silhouette Score: {silhouette_avg:.4f}\n"
                         f"Calinski-Harabasz Score: {calinski_harabasz:.4f}\n"
                         f"Davies-Bouldin Score: {davies_bouldin:.4f}")
@@ -436,15 +366,27 @@ class PlotHelper:
         ax7.text(0.1, 0.7, metrics_text, fontsize=12, verticalalignment='top')
 
         plt.tight_layout()
-        
-        print("\nSpectral Clustering Results:")
-        print(f"Number of clusters: {n_clusters}")
-        print(f"Silhouette Score: {silhouette_avg:.4f}")
-        print(f"Calinski-Harabasz Score: {calinski_harabasz:.4f}")
-        print(f"Davies-Bouldin Score: {davies_bouldin:.4f}")
-        
         self._save_and_show(params)
+        
+    def _plot_silhouette(self, ax, data, cluster_labels, n_clusters, silhouette_avg):
+        sample_silhouette_values = silhouette_samples(data, cluster_labels)
+        y_lower = 10
+        for i in range(n_clusters):
+            ith_cluster_silhouette_values = sample_silhouette_values[cluster_labels == i]
+            ith_cluster_silhouette_values.sort()
+            size_cluster_i = ith_cluster_silhouette_values.shape[0]
+            y_upper = y_lower + size_cluster_i
+            color = plt.cm.nipy_spectral(float(i) / n_clusters)
+            ax.fill_betweenx(np.arange(y_lower, y_upper), 0, ith_cluster_silhouette_values,
+                             facecolor=color, edgecolor=color, alpha=0.7)
+            y_lower = y_upper + 10
+        ax.set_title("Silhouette plot for the various clusters")
+        ax.set_xlabel("Silhouette coefficient values")
+        ax.set_ylabel("Cluster label")
+        ax.axvline(x=silhouette_avg, color="red", linestyle="--")
+        ax.set_yticks([])  # Clear the yaxis labels / ticks
 
+        
     def _save_and_show(self, params):
         """
         Save the current plot to a file and optionally display it.
@@ -457,6 +399,6 @@ class PlotHelper:
         """
         plt.savefig(params['outputFileName'])
         print(f"\nPlot saved as: {params['outputFileName']}")
-        if params['show']:
-            plt.show()
+        # if params['show']:
+        plt.show()
         plt.close()

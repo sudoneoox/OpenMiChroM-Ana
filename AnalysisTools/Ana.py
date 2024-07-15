@@ -1,31 +1,39 @@
 import AnalysisTools.compute_helpers as compute_helpers
-import AnalysisTools.plot_helpers as plot_helpers
+from AnalysisTools.plot_helpers import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
-import numpy as np
-import pandas as pd
-import multiprocessing as mp
-from sklearn.preprocessing import normalize
-import os 
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import cdist
+
+from sklearn.cluster import SpectralClustering
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.utils import resample
+from sklearn.neighbors import NearestNeighbors
+
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import cdist
+from scipy.sparse import csgraph
+from scipy.sparse.linalg import eigsh
+
+import numpy as np
 import umap
 import ivis
-
-
+import os 
 
 class Ana:
-    def __init__(self, outputFolderPath: str = None, execution_mode: str = 'cpu'):
+    def __init__(self, outputFolderPath: str = "", execution_mode: str = 'cpu', showPlots=True):
         """
         Initializes the Ana class with a base folder for data storage.
         """
         self.datasets = {}
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
+        self.showPlots = showPlots
         
-        if outputFolderPath is None:
+        if self.showPlots:
+            self.plot_helper = PlotHelper()
+        else:
+            self.plot_helper = None
+        
+        if outputFolderPath is "":
             self.outPath = os.path.join(os.getcwd(), 'Analysis')
             os.makedirs(self.outPath, exist_ok=True)
         else:
@@ -36,7 +44,7 @@ class Ana:
         os.makedirs(self.cache_path, exist_ok=True)
         
         self.execution_mode = execution_mode
-        if execution_mode == 'cuda':
+        if self.execution_mode == 'cuda':
             try:
                 import cupy
                 compute_helpers.set_cuda_availability(True)
@@ -60,7 +68,7 @@ class Ana:
         self.datasets[label] = {
             'folder': folder,
             'trajectories': None,  # Trajectory data for the dataset
-            'distance_array': None,  # Euclidean distance array
+            'distance_array': None,  # distance array
         }
 
 
@@ -86,7 +94,7 @@ class Ana:
 
         if trajs_xyz:
             max_shape = np.max([traj.shape for traj in trajs_xyz], axis=0)
-            trajs_xyz = [self.pad_array(traj, max_shape) if not np.array_equal(traj.shape, max_shape) else traj for traj in trajs_xyz]
+            trajs_xyz = [compute_helpers.pad_array(traj, max_shape) if not np.array_equal(traj.shape, max_shape) else traj for traj in trajs_xyz]
             self.datasets[label]['trajectories'] = np.vstack(trajs_xyz)
             print(f'Trajectory for {label} has shape {self.datasets[label]["trajectories"].shape}')
         else:
@@ -125,9 +133,9 @@ class Ana:
             print(f"Error processing trajectory {replica}: {str(e)}")
             return np.array([])
 
-    """======================== CLUSTERING ======================="""
+    """===================================== Analysis ===================================="""
 
-    def dendogram_Z(self, *args: str, method: str = 'weighted', metric: str = 'euclidean') -> np.array:
+    def dendogram_Z(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> np.array:
         """
         Creates the linkage matrix (dendrogram data) for given labels.
 
@@ -139,10 +147,17 @@ class Ana:
         Returns:
             np.array: The linkage matrix.
         """
-        X, Z = self.calc_XZ(*args, method=method, metric=metric)
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'dendrogram_plot_{args}_{method}_{metric}.png'),
+                'title': 'Dendrogram'
+            }
+        self.plot_helper.plot(plot_type="dendrogram", data=Z, plot_params=plot_params)
         return Z
 
-    def create_euclidian_dist_map(self, label: str) -> np.array:
+    def dist_map(self, label: str, method="euclidean") -> np.array:
         """
         Creates the Euclidean distance map for a given dataset.
 
@@ -159,13 +174,22 @@ class Ana:
             return np.array([])
 
         if self.datasets[label]["distance_array"] is None:
-            compute_dist = [cdist(val, val, 'euclidean') for val in trajectories]
+            compute_dist = [cdist(val, val, method) for val in trajectories]
             compute_dist = np.array(compute_dist)
             self.datasets[label]['distance_array'] = compute_dist
+            
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'{label}_dist_map.png'),
+                'title': f'{label} Distance Map',
+                'x_label': 'Beads',
+                'y_label': 'Beads'
+            }
+        self.plot_helper.plot(plot_type="euclidiandistmap", data=[self.datasets[label]["distance_array"]], plot_params=plot_params)
 
         return self.datasets[label]['distance_array']
 
-    def PCA_plot(self, *args: str, method: str = 'weighted', metric: str = 'euclidean') -> tuple:
+    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
         Performs PCA on the datasets and returns the principal components and explained variance.
 
@@ -178,7 +202,7 @@ class Ana:
             tuple: (np.array, np.array) The principal components and the explained variance ratio.
         """
         num_clusters = len(args)
-        flattened_distance_array, linkage_matrix = self.calc_XZ(*args, method=method, metric=metric)
+        flattened_distance_array, linkage_matrix = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
 
         threshold = linkage_matrix[-num_clusters, 2]
         fclust = fcluster(linkage_matrix, t=threshold, criterion='distance')
@@ -186,10 +210,21 @@ class Ana:
         pca = PCA(n_components=2)
         principalComponents = pca.fit_transform(flattened_distance_array)
         explained_variance_ratio = pca.explained_variance_ratio_
+        
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}-{method}_{metric}.png'),
+                'title': 'PCA Plot',
+                'x_label': 'Principal Component 1',
+                'y_label': 'Principal Component 2'
+            }
+        self.plot_helper.plot(plot_type="pcaplot", 
+                              data=[principalComponents, explained_variance_ratio, fclust], 
+                              plot_params=plot_params)
 
         return principalComponents, explained_variance_ratio, fclust
 
-    def tsne_plot(self, *args: str, tsneParams: dict = None, sample_size: int = 5000, num_clusters: int = None, method: str = 'weighted') -> tuple:
+    def tsne(self, *args: str, tsneParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric:str = "euclidean", norm: str = 'ice') -> tuple:
         """
         Performs t-SNE on the datasets and returns the t-SNE results and clusters.
 
@@ -203,20 +238,19 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The t-SNE results and the clusters.
         """
-        if num_clusters is None:
+        if num_clusters is -1:
             num_clusters = len(args)
 
         default_tsne_params = {
             'n_components': 2,
             'verbose': 1,
             'max_iter': 800,
-            'metric': 'euclidean',
         }
 
         if tsneParams is not None:
             default_tsne_params.update(tsneParams)
 
-        X, Z = self.calc_XZ(*args, method=method, metric=default_tsne_params['metric'])
+        X, Z = self.calc_XZ(*args, method=method,metric=metric, norm=norm)
 
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
@@ -230,10 +264,19 @@ class Ana:
 
         tsne = TSNE(**default_tsne_params)
         tsne_res = tsne.fit_transform(X)
+        
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'tsne_plot_{args}_{method}.png'),
+                'title': 't-SNE Plot',
+                'x_label': 't-SNE 1',
+                'y_label': 't-SNE 2'
+            }
+        self.plot_helper.plot(plot_type="tsneplot", data=[tsne_res, fclust], plot_params=plot_params)
 
         return tsne_res, fclust
 
-    def umap_plot(self, *args: str, umapParams: dict = None, sample_size: int = 5000, num_clusters: int = None, method: str = 'weighted') -> tuple:
+    def umap(self, *args: str, umapParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
         Performs UMAP on the datasets and returns the UMAP results and clusters.
 
@@ -247,21 +290,20 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The UMAP results and the clusters.
         """
-        if num_clusters is None:
+        if num_clusters is -1:
             num_clusters = len(args)
 
         default_umap_params = {
             'n_neighbors': 15,
             'min_dist': 0.1,
             'n_components': 2,
-            'metric': 'euclidean',
             'random_state': 42
         }
 
         if umapParams is not None:
             default_umap_params.update(umapParams)
 
-        X, Z = self.calc_XZ(*args, method=method, metric=default_umap_params['metric'])
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
 
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
@@ -271,10 +313,21 @@ class Ana:
 
         reducer = umap.UMAP(**default_umap_params)
         umap_res = reducer.fit_transform(X)
+        
+        
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'umap_plot_{args}_{method}.png'),
+                'title': 'UMAP Plot',
+                'x_label': 'UMAP 1',
+                'y_label': 'UMAP 2'
+            }
+        self.plot_helper.plot(plot_type="umapplot", data=[umap_res, fclust], plot_params=plot_params)
+
 
         return umap_res, fclust
 
-    def ivis_plot(self, *args: str, ivisParams: dict = None, sample_size: int = 5000, num_clusters: int = None, method: str = 'weighted') -> tuple:
+    def ivis_clustering(self, *args: str, ivisParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str="euclidean", norm: str = 'ice') -> tuple:
         """
         Performs IVIS on the datasets and returns the IVIS results and clusters.
 
@@ -284,11 +337,12 @@ class Ana:
             sample_size (int, optional): The sample size for IVIS. Default is 5000.
             num_clusters (int, optional): Number of clusters. Default is None.
             method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str, optional): the metric for hierarchical clustering. Default is euclidean
 
         Returns:
             tuple: (np.array, np.array) The IVIS results and the clusters.
         """
-        if num_clusters is None:
+        if num_clusters is -1:
             num_clusters = len(args)
 
         default_ivis_params = {
@@ -302,7 +356,7 @@ class Ana:
         if ivisParams is not None:
             default_ivis_params.update(ivisParams)
 
-        X, Z = self.calc_XZ(*args, method=method, metric='euclidean')
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
 
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
@@ -315,29 +369,86 @@ class Ana:
 
         model = ivis.Ivis(**default_ivis_params)
         ivis_res = model.fit_transform(X)
+        
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'ivis_plot_{args}_{method}.png'),
+                'title': 'IVIS Plot',
+                'x_label': 'IVIS 1',
+                'y_label': 'IVIS 2'
+            }
+        self.plot_helper.plot(plot_type="ivisplot", data=[ivis_res, fclust], plot_params=plot_params)
+
 
         return ivis_res, fclust
-
-    """======================== UTILITIES ======================="""
-
-    def pad_array(self, array: np.array, target_shape: tuple) -> np.array:
+    
+    def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
-        Pads a 3D array to the target shape with zeros.
+        Performs spectral clustering on the datasets and returns the clustering results.
 
         Args:
-            array (np.array): The array to pad.
-            target_shape (tuple): The target shape to pad to.
+            *args: (str): The labels to create the spectral clustering from.
+            spectralParams (dict, optional): Parameters for the spectral clustering algorithm.
+            sample_size (int, optional): The sample size for spectral clustering. Default is 5000.
+            num_clusters (int, optional): Number of clusters. If None, it will be determined automatically.
+            method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str, optional): The distance metric to use. Default is 'euclidean'.
 
         Returns:
-            np.array: The padded array.
+            tuple: (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, silhouette_avg, calinski_harabasz, davies_bouldin)
         """
-        result = np.zeros(target_shape)
-        slices = tuple(slice(0, dim) for dim in array.shape)
-        result[slices] = array
-        return result
-    
-        
+        default_spectral_params = {
+            'n_neighbors': 30,
+            'random_state': 42,
+            'assign_labels': 'kmeans'
+        }
 
+        if spectralParams is not None:
+            default_spectral_params.update(spectralParams)
+
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+
+        if num_clusters is -1:
+            num_clusters = len(args)
+
+        # Improve affinity matrix calculation
+        n_neighbors = min(default_spectral_params['n_neighbors'], X.shape[0] - 1)
+        knn_graph = NearestNeighbors(n_neighbors=n_neighbors, metric="precomputed").fit(X).kneighbors_graph()
+        affinity_matrix = 0.5 * (knn_graph + knn_graph.T)
+        
+        # Use Gaussian kernel for affinity
+        sigma = np.mean(affinity_matrix.data)
+        affinity_matrix.data = np.exp(-affinity_matrix.data ** 2 / (2. * sigma ** 2))
+        
+        # Perform spectral clustering
+        sc = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', 
+                                random_state=default_spectral_params['random_state'], 
+                                assign_labels=default_spectral_params['assign_labels'])
+        cluster_labels = sc.fit_predict(affinity_matrix)
+        
+        # Compute Laplacian and its eigenvectors
+        laplacian = csgraph.laplacian(affinity_matrix, normed=True)
+        eigenvalues, eigenvectors = eigsh(laplacian, k=num_clusters, which='SM')
+        
+        # Compute clustering metrics
+        silhouette_avg, calinski_harabasz, davies_bouldin = compute_helpers.evaluate_clustering(X, cluster_labels)
+
+        results = (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, 
+                silhouette_avg, calinski_harabasz, davies_bouldin)
+
+        if self.showPlots:
+            plot_params = {
+                'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
+                'title': 'Spectral Clustering Plot',
+            }
+            self.plot_helper._spectralclusteringplot(X, results, plot_params)
+
+        return results
+
+    """=========================================UTILITIES========================================"""
 
     def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', n_jobs: int = -1, norm: str = 'ice') -> tuple:
         key = tuple(sorted(args)) + (method, metric, norm)
