@@ -18,11 +18,21 @@ import umap
 import ivis
 import os 
 
+
+
 class Ana:
-    def __init__(self, outputFolderPath: str = "", execution_mode: str = 'cpu', showPlots=True):
-        """
+    def __init__(self, analysisStoragePath: str = "", execution_mode: str = 'cpu', showPlots=True, cacheStoragePath: str=''):
+        """__init__
+
         Initializes the Ana class with a base folder for data storage.
-        """
+
+        Keyword Arguments:
+            analysisStoragePath -- directory path to store analysis results (default: {""})
+            execution_mode -- whether to use cpu/cuda for execution (default: {'cpu'})
+            showPlots -- shows plots from plothelper class instead of having to manually do it (default: {True})
+            cacheStoragePath -- directory path to store cache if (NONE) it wont save to a cache directory (default: {''})
+        """  
+        
         self.datasets = {}
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
@@ -33,15 +43,19 @@ class Ana:
         else:
             self.plot_helper = None
         
-        if outputFolderPath is "":
+        if analysisStoragePath == "":
             self.outPath = os.path.join(os.getcwd(), 'Analysis')
             os.makedirs(self.outPath, exist_ok=True)
         else:
-            self.outPath = os.path.join(os.getcwd(), outputFolderPath)
+            self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
-        self.cache_path = os.path.join(os.getcwd(), 'cache')
-        os.makedirs(self.cache_path, exist_ok=True)
+        if cacheStoragePath == "":
+            self.cache_path = os.path.join(os.getcwd(), 'cache')
+            os.makedirs(self.cache_path, exist_ok=True)
+        else:
+            self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
+            os.makedirs(self.cache_path, exist_ok=True)
         
         self.execution_mode = execution_mode
         if self.execution_mode == 'cuda':
@@ -169,11 +183,11 @@ class Ana:
         """
         trajectories = self.datasets[label]['trajectories']
 
-        if trajectories is None:
+        if trajectories == None:
             print(f"Trajectories not yet loaded for {label}. Load them first")
             return np.array([])
 
-        if self.datasets[label]["distance_array"] is None:
+        if self.datasets[label]["distance_array"] == None:
             compute_dist = [cdist(val, val, method) for val in trajectories]
             compute_dist = np.array(compute_dist)
             self.datasets[label]['distance_array'] = compute_dist
@@ -238,7 +252,7 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The t-SNE results and the clusters.
         """
-        if num_clusters is -1:
+        if num_clusters == -1:
             num_clusters = len(args)
 
         default_tsne_params = {
@@ -247,7 +261,7 @@ class Ana:
             'max_iter': 800,
         }
 
-        if tsneParams is not None:
+        if tsneParams != None:
             default_tsne_params.update(tsneParams)
 
         X, Z = self.calc_XZ(*args, method=method,metric=metric, norm=norm)
@@ -290,7 +304,7 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The UMAP results and the clusters.
         """
-        if num_clusters is -1:
+        if num_clusters == -1:
             num_clusters = len(args)
 
         default_umap_params = {
@@ -300,7 +314,7 @@ class Ana:
             'random_state': 42
         }
 
-        if umapParams is not None:
+        if umapParams != None:
             default_umap_params.update(umapParams)
 
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
@@ -342,7 +356,7 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The IVIS results and the clusters.
         """
-        if num_clusters is -1:
+        if num_clusters == -1:
             num_clusters = len(args)
 
         default_ivis_params = {
@@ -403,7 +417,7 @@ class Ana:
             'assign_labels': 'kmeans'
         }
 
-        if spectralParams is not None:
+        if spectralParams != None:
             default_spectral_params.update(spectralParams)
 
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
@@ -411,7 +425,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
 
-        if num_clusters is -1:
+        if num_clusters == -1:
             num_clusters = len(args)
 
         # Improve affinity matrix calculation
@@ -467,7 +481,7 @@ class Ana:
         for label in args:
             print(f'Processing {label}')
             trajectories = self.datasets[label]['trajectories']
-            if trajectories is None or len(trajectories) == 0:
+            if trajectories != None or len(trajectories) == 0:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
@@ -494,3 +508,34 @@ class Ana:
         
         np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
+    
+    
+    
+    
+    """ ============================================================= Getters/Setters ============================================================================================"""
+
+    def getCachePath(self):
+        return self.cache_path
+    
+    def getAnalysisPath(self):
+        return self.outPath
+    
+    def getExecutionMode(self):
+        return self.execution_mode
+    
+    def getShowPlots(self):
+        return self.showPlots
+    
+    def setAnalysisPath(self, path: str):
+        self.outPath = os.path.join(os.getcwd(), path)
+        os.makedirs(self.outPath, exist_ok=True)
+    
+    def setCachePath(self, path: str):
+        self.cache_path = os.path.join(os.getcwd(), path)
+        os.makedirs(self.cache_path, exist_ok=True)
+    
+    def setExecutionMode(self, execMode: str):
+        self.execution_mode = execMode
+    
+    def setShowPlots(self, show: bool):
+        self.showPlots = show

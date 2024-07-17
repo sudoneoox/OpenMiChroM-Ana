@@ -402,3 +402,13 @@ class PlotHelper:
         # if params['show']:
         plt.show()
         plt.close()
+        
+        
+    """======================================================== Getters / Setters ========================================================"""
+    def getInitialParams(self):
+        return self.default_params
+    
+    def setInitialParams(self, params: dict):
+        for key in params:
+            self.default_params[key] = params[key]
+        print(f'the updated initial plot parameters are: {self.default_params}')

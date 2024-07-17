@@ -2,7 +2,6 @@ import numpy as np
 from sklearn.preprocessing import normalize
 from scipy.spatial.distance import pdist, squareform
 from numba import jit, cuda
-import cupy as cp
 from joblib import Parallel, delayed, Memory
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score, silhouette_samples
 from kneed import KneeLocator
@@ -16,10 +15,8 @@ CUDA_AVAILABLE = False
 def set_cuda_availability(available):
     global CUDA_AVAILABLE
     CUDA_AVAILABLE = available
-
-def set_cuda_availability(available):
-    global CUDA_AVAILABLE
-    CUDA_AVAILABLE = available
+    if CUDA_AVAILABLE == True:
+        import cupy as cp
 
 
 
