@@ -6,8 +6,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
-import AnalysisTools.compute_helpers as compute_helpers
-
+from AnalysisTools.compute_helpers import ComputeHelpers
+import os
 
 class PlotHelper:
     """
@@ -22,7 +22,7 @@ class PlotHelper:
     Returns:
         None
     """
-    def __init__(self):
+    def __init__(self, cacheStorage: str = '', AnalysisStorage: str = '' ):
         self.default_params = {
             'figsize': (10, 7),
             'cmap': 'viridis',
@@ -47,6 +47,17 @@ class PlotHelper:
             'n_components': 2,
             'max_clusters': 10
         }
+        
+        self.cacheStorage = os.path.join(os.getcwd(), cacheStorage)
+        self.compute_helpers = ComputeHelpers()
+        self.compute_helpers.setMem(path=self.cacheStorage)
+        
+        if AnalysisStorage == '':
+            self.AnalysisStorage = os.path.join(os.getcwd(), 'Analysis')
+            os.makedirs(self.AnalysisStorage, exist_ok=True)
+        else:
+            self.AnalysisStorage = os.path.join(os.getcwd(), AnalysisStorage)
+            os.makedirs(self.AnalysisStorage, exist_ok=True)
 
     def plot(self, plot_type, data, plot_params=None, **kwargs):
         if plot_params:
@@ -180,12 +191,12 @@ class PlotHelper:
         """
         res, fclust = data
         
-        n_clusters = compute_helpers.find_optimal_clusters(res)
+        n_clusters = self.compute_helpers.find_optimal_clusters(data=res)
         
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         cluster_labels = kmeans.fit_predict(res)
 
-        compute_helpers.evaluate_clustering(res, cluster_labels)
+        self.compute_helpers.evaluate_clustering(res, cluster_labels)
 
         fig = plt.figure(figsize=params['figsize'])
         
@@ -412,3 +423,6 @@ class PlotHelper:
         for key in params:
             self.default_params[key] = params[key]
         print(f'the updated initial plot parameters are: {self.default_params}')
+        
+    def setMeMForComputeHelpers(self, path: str):
+        self.compute_helpers.setMem(path=path)

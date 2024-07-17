@@ -1,4 +1,4 @@
-import AnalysisTools.compute_helpers as compute_helpers
+from AnalysisTools.compute_helpers import ComputeHelpers
 from AnalysisTools.plot_helpers import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 
@@ -21,22 +21,25 @@ import os
 
 
 class Ana:
-    def __init__(self, analysisStoragePath: str = "", execution_mode: str = 'cpu', showPlots=True, cacheStoragePath: str=''):
+    def __init__(self, analysisStoragePath: str = "", execution_mode: str = 'cpu', showPlots=True, cacheStoragePath: str=""):
         """__init__
 
         Initializes the Ana class with a base folder for data storage.
 
-        Keyword Arguments:
-            analysisStoragePath -- directory path to store analysis results (default: {""})
-            execution_mode -- whether to use cpu/cuda for execution (default: {'cpu'})
-            showPlots -- shows plots from plothelper class instead of having to manually do it (default: {True})
-            cacheStoragePath -- directory path to store cache if (NONE) it wont save to a cache directory (default: {''})
+        Args:
+            analysisStoragePath (str): directory path to store analysis results (default: {""})
+            execution_mode (str): whether to use cpu/cuda for execution (default: {'cpu'})
+            showPlots (bool): shows plots from plothelper class instead of having to manually do it (default: {True})
+            cacheStoragePath (str): directory path to store cache if (NONE) it wont save to a cache directory (default: {""})
         """  
         
         self.datasets = {}
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
         self.showPlots = showPlots
+        
+        self.compute_helpers = ComputeHelpers()
+    
         
         if self.showPlots:
             self.plot_helper = PlotHelper()
@@ -53,26 +56,31 @@ class Ana:
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
+            self.compute_helpers.setMem(path='cache')
+            
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
+            self.compute_helpers.setMem(path=cacheStoragePath)
+            self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
         
         self.execution_mode = execution_mode
         if self.execution_mode == 'cuda':
             try:
                 import cupy
-                compute_helpers.set_cuda_availability(True)
+                self.compute_helpers.set_cuda_availability(True)
                 print("CUDA is available and will be used for computations.")
             except ImportError:
                 print("CUDA requested but CuPy not found. Falling back to CPU.")
                 self.execution_mode = 'cpu'
-                compute_helpers.set_cuda_availability(False)
+                self.compute_helpers.set_cuda_availability(False)
         else:
-            compute_helpers.set_cuda_availability(False)
+            self.compute_helpers.set_cuda_availability(False)
 
 
     def add_dataset(self, label: str, folder: str):
-        """
+        """add_dataset
+        
         Adds a dataset to the analysis.
         
         Args:
@@ -108,7 +116,7 @@ class Ana:
 
         if trajs_xyz:
             max_shape = np.max([traj.shape for traj in trajs_xyz], axis=0)
-            trajs_xyz = [compute_helpers.pad_array(traj, max_shape) if not np.array_equal(traj.shape, max_shape) else traj for traj in trajs_xyz]
+            trajs_xyz = [self.compute_helpers.pad_array(traj, max_shape) if not np.array_equal(traj.shape, max_shape) else traj for traj in trajs_xyz]
             self.datasets[label]['trajectories'] = np.vstack(trajs_xyz)
             print(f'Trajectory for {label} has shape {self.datasets[label]["trajectories"].shape}')
         else:
@@ -448,7 +456,7 @@ class Ana:
         eigenvalues, eigenvectors = eigsh(laplacian, k=num_clusters, which='SM')
         
         # Compute clustering metrics
-        silhouette_avg, calinski_harabasz, davies_bouldin = compute_helpers.evaluate_clustering(X, cluster_labels)
+        silhouette_avg, calinski_harabasz, davies_bouldin = self.compute_helpers.evaluate_clustering(X, cluster_labels)
 
         results = (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, 
                 silhouette_avg, calinski_harabasz, davies_bouldin)
@@ -485,11 +493,11 @@ class Ana:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
-            dist = compute_helpers.cached_calc_dist(trajectories, metric, self.execution_mode, n_jobs)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric, self.execution_mode, n_jobs)
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
             
-            normalized_dist = np.array([compute_helpers.norm_distMatrix(matrix, norm=norm) for matrix in dist])
+            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix, norm=norm) for matrix in dist])
             self.datasets[label]["distance_array"] = normalized_dist
             flat_euclid_dist_map[label] = normalized_dist
             
