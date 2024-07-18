@@ -8,9 +8,7 @@ from kneed import KneeLocator
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
-import umap
-
-
+import umap.umap_ as umap
 
 @jit(nopython=True)
 def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
@@ -61,7 +59,7 @@ def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
-    
+     
     return matrix_balanced
 
 class ComputeHelpers:
@@ -421,7 +419,10 @@ class ComputeHelpers:
         if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
             return self._pca_reduction_gpu(X, n_components)
         else:
-            return PCA(n_components=n_components).fit_transform(X)
+            pca = PCA(n_components=n_components)
+            result = pca.fit_transform(X)
+            return result, pca.explained_variance_ratio_, pca.components_
+
 
     def _pca_reduction_gpu(self, X, n_components):
         X_gpu = cp.array(X)
@@ -429,28 +430,39 @@ class ComputeHelpers:
         X_centered = X_gpu - mean
         U, S, V = cp.linalg.svd(X_centered, full_matrices=False)
         components = V[:n_components].T
-        return cp.asnumpy(cp.dot(X_centered, components))
+        result = cp.asnumpy(cp.dot(X_centered, components))
+        explained_variance_ratio = (S[:n_components]**2) / (S**2).sum()
+        return result, explained_variance_ratio, components
 
     def _svd_reduction(self, X, n_components, execution_mode, n_jobs):
         if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
             return self._svd_reduction_gpu(X, n_components)
         else:
-            return TruncatedSVD(n_components=n_components).fit_transform(X)
+            svd = TruncatedSVD(n_components=n_components)
+            result = svd.fit_transform(X)
+            return result
 
     def _svd_reduction_gpu(self, X, n_components):
         X_gpu = cp.array(X)
         U, S, V = cp.linalg.svd(X_gpu, full_matrices=False)
-        return cp.asnumpy(cp.dot(X_gpu, V.T[:, :n_components]))
+        result = cp.asnumpy(cp.dot(X_gpu, V.T[:, :n_components]))
+        return result
 
     def _tsne_reduction(self, X, n_components, execution_mode, n_jobs):
-        return TSNE(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
-
+        tsne = TSNE(n_components=n_components, n_jobs=n_jobs)
+        result = tsne.fit_transform(X)
+        return result, tsne.kl_divergence_, None
+    
     def _umap_reduction(self, X, n_components, execution_mode, n_jobs):
-        return umap.UMAP(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
+        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=n_jobs)
+        result = umap_reducer.fit_transform(X)
+        return result, umap_reducer.embedding_, umap_reducer.graph_
+
 
     def _mds_reduction(self, X, n_components, execution_mode, n_jobs):
-        return MDS(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
-    
+        mds = MDS(n_components=n_components, n_jobs=n_jobs)
+        result = mds.fit_transform(X)
+        return result, mds.stress_, mds.dissimilarity_matrix_
 
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''

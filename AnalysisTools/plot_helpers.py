@@ -10,7 +10,7 @@ from AnalysisTools.compute_helpers import ComputeHelpers
 import os
 
 class PlotHelper:
-    """
+    """PlotHelper
     Generate a specified type of plot.
 
     Args:
@@ -92,6 +92,7 @@ class PlotHelper:
         print(f"HiC map plot created with vmin={params['vmin']}, vmax={params['vmax']}")
         self._save_and_show(params)
 
+
     def _genomedistanceplot(self, data, params):
         """
         Create a genome distance plot.
@@ -114,6 +115,7 @@ class PlotHelper:
         ax.legend()
         print(f"Genome distance plot created with {len(scale_exp)} data points")
         self._save_and_show(params)
+
 
     def _errorplot(self, data, params):
         """
@@ -177,46 +179,34 @@ class PlotHelper:
         self._save_and_show(params)
 
 
-    def _dimensionality_reduction_plot(self, data, params, n_components):
-        """
-        Create a dimensionality reduction plot.
-
-        Args:
-            data (list): [reduced_data, cluster_labels]
-            params (dict): Plotting parameters.
-            n_components (int): Number of dimensions (2 or 3).
-
-        Returns:
-            None
-        """
-        res, fclust = data
+    def _dimensionality_reduction_plot(self, data, params):
+        result, additional_info, _ = data
+        n_components = params.get('n_components', 2)
         
-        n_clusters = self.compute_helpers.find_optimal_clusters(data=res)
-        
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        cluster_labels = kmeans.fit_predict(res)
-
-        self.compute_helpers.evaluate_clustering(res, cluster_labels)
-
         fig = plt.figure(figsize=params['figsize'])
         
         if n_components == 2:
             ax = fig.add_subplot(111)
-            scatter = ax.scatter(res[:, 0], res[:, 1], c=cluster_labels, alpha=params['alpha'], s=params['size'], cmap=params['cmap'])
+            scatter = ax.scatter(result[:, 0], result[:, 1], alpha=params['alpha'], s=params['size'], cmap=params['cmap'])
         elif n_components == 3:
             ax = fig.add_subplot(111, projection='3d')
-            scatter = ax.scatter(res[:, 0], res[:, 1], res[:, 2], c=cluster_labels, alpha=params['alpha'], cmap=params['cmap'], s=params['size'])
+            scatter = ax.scatter(result[:, 0], result[:, 1], result[:, 2], alpha=params['alpha'], cmap=params['cmap'], s=params['size'])
             ax.set_zlabel(params['z_label'])
         
         ax.set_xlabel(params['x_label'])
         ax.set_ylabel(params['y_label'])
-        plt.title(f"{params['title']} (Optimal clusters: {n_clusters})")
+        plt.title(params['title'])
         
-        ticks = np.arange(n_clusters)
-        cbar = plt.colorbar(scatter)
-        cbar.set_ticks(ticks)
+        plt.colorbar(scatter)
         
-        print(f"Dimensionality reduction plot created with {n_components} components and {n_clusters} clusters")
+        if additional_info is not None:
+            if isinstance(additional_info, np.ndarray) and additional_info.size == n_components:
+                for i, var in enumerate(additional_info):
+                    plt.text(0.05, 0.95 - i*0.05, f"PC{i+1} variance: {var:.2f}", transform=ax.transAxes)
+            elif isinstance(additional_info, float):
+                plt.text(0.05, 0.95, f"Additional info: {additional_info:.4f}", transform=ax.transAxes)
+        
+        print(f"Dimensionality reduction plot created with {n_components} components")
         self._save_and_show(params)
 
     def _pcaplot(self, data, params):
@@ -230,17 +220,9 @@ class PlotHelper:
         Returns:
             None
         """
-        principalDF, explained_variance_ratio, fclust = data
-        n_components = params.get('n_components', 2)
-        
-        print("\nPCA Analysis:")
-        print(f"Number of components: {n_components}")
-        print("Explained Variance Ratio:")
-        for i, ratio in enumerate(explained_variance_ratio[:n_components]):
-            print(f"  PC{i+1}: {ratio:.4f}")
-        print(f"Total explained variance: {sum(explained_variance_ratio[:n_components]):.4f}")
-        
-        self._dimensionality_reduction_plot((principalDF, fclust), params, n_components)
+        print("\nPCA Plot:")
+        self._dimensionality_reduction_plot(data, params)
+
 
     def _tsneplot(self, data, params):
         """
@@ -253,11 +235,9 @@ class PlotHelper:
         Returns:
             None
         """
-        n_components = params.get('n_components', 2)
         print("\nt-SNE Plot:")
-        print(f"Number of components: {n_components}")
-        self._dimensionality_reduction_plot(data, params, n_components)
-
+        self._dimensionality_reduction_plot(data, params)
+        
     def _umapplot(self, data, params):
         """
         Create a UMAP plot.
@@ -269,10 +249,8 @@ class PlotHelper:
         Returns:
             None
         """
-        n_components = params.get('n_components', 2)
         print("\nUMAP Plot:")
-        print(f"Number of components: {n_components}")
-        self._dimensionality_reduction_plot(data, params, n_components)
+        self._dimensionality_reduction_plot(data, params)
 
     def _ivisplot(self, data, params):
         """
@@ -285,27 +263,81 @@ class PlotHelper:
         Returns:
             None
         """
-        n_components = params.get('embedding_dims', 2)
         print("\nivis Plot:")
-        print(f"Number of components: {n_components}")
-        self._dimensionality_reduction_plot(data, params, n_components)
+        self._dimensionality_reduction_plot(data, params)
         
  
-    def _ivisplot(self, data, params):
+    def _svdplot(self, data, params):
         """
-        Create an ivis plot.
+        Create an SVD plot.
 
         Args:
-            data (list): [ivis_results, cluster_labels]
+            data (tuple): (svd_result, singular_values, vt) The SVD results, singular values, and right singular vectors.
             params (dict): Plotting parameters.
 
         Returns:
             None
         """
-        n_components = params.get('embedding_dims', 2)
-        print("\nivis Plot:")
-        print(f"Number of components: {n_components}")
-        self._dimensionality_reduction_plot(data, params, n_components)
+        print("\nSVD Plot:")
+        result, singular_values, vt = data
+        n_components = params.get('n_components', 2)
+        
+        fig = plt.figure(figsize=params['figsize'])
+        
+        # Plot the reduced data
+        ax1 = fig.add_subplot(121)
+        scatter = ax1.scatter(result[:, 0], result[:, 1], alpha=params['alpha'], s=params['size'], cmap=params['cmap'])
+        ax1.set_xlabel(params['x_label'])
+        ax1.set_ylabel(params['y_label'])
+        ax1.set_title('SVD Reduced Data')
+        plt.colorbar(scatter, ax=ax1)
+        
+        # Plot the singular values
+        ax2 = fig.add_subplot(122)
+        ax2.plot(range(1, len(singular_values) + 1), singular_values, 'bo-')
+        ax2.set_xlabel('Component')
+        ax2.set_ylabel('Singular Value')
+        ax2.set_title('Singular Values')
+        
+        plt.tight_layout()
+        plt.suptitle(params['title'], fontsize=16)
+        
+        print(f"SVD plot created with {n_components} components")
+        self._save_and_show(params)
+
+    def _mdsplot(self, data, params):
+        """
+        Create an MDS plot.
+
+        Args:
+            data (tuple): (mds_result, stress, dissimilarity_matrix) The MDS results, stress value, and dissimilarity matrix.
+            params (dict): Plotting parameters.
+
+        Returns:
+            None
+        """
+        print("\nMDS Plot:")
+        result, stress, _ = data
+        n_components = params.get('n_components', 2)
+        
+        fig = plt.figure(figsize=params['figsize'])
+        
+        if n_components == 2:
+            ax = fig.add_subplot(111)
+            scatter = ax.scatter(result[:, 0], result[:, 1], alpha=params['alpha'], s=params['size'], cmap=params['cmap'])
+        elif n_components == 3:
+            ax = fig.add_subplot(111, projection='3d')
+            scatter = ax.scatter(result[:, 0], result[:, 1], result[:, 2], alpha=params['alpha'], cmap=params['cmap'], s=params['size'])
+            ax.set_zlabel(params['z_label'])
+        
+        ax.set_xlabel(params['x_label'])
+        ax.set_ylabel(params['y_label'])
+        plt.title(f"{params['title']} (Stress: {stress:.4f})")
+        
+        plt.colorbar(scatter)
+        
+        print(f"MDS plot created with {n_components} components")
+        self._save_and_show(params)
         
  
     def _spectralclusteringplot(self, data, cluster_results, params):

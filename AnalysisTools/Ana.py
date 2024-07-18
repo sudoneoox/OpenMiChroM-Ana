@@ -224,13 +224,16 @@ class Ana:
             tuple: (np.array, np.array) The principal components and the explained variance ratio.
         """
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-        pca_result = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode)
+        if n_components == -1:
+            n_components = self.compute_helpers.find_optimal_clusters(X, 15)
+        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode, n_jobs=-1)
         if self.showPlots:
-            self.plot_helper.plot(plot_type="pcaplot", data=pca_result, plot_params={
+            self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}_{method}_{metric}.png'),
-                'title': 'PCA Plot'
+                'title': 'PCA Plot',
+                'n_components': n_components
             })
-        return pca_result
+        return pca_result, explained_variance_ratio, components
 
     def tsne(self, *args: str, tsneParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = "euclidean", norm: str = 'ice') -> tuple:        
         """
@@ -249,13 +252,13 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        tsne_result = self.compute_helpers.run_reduction('tsne', X, n_components=2, execution_mode=self.execution_mode, **tsneParams or {})
+        tsne_result, kl_divergence, _ = self.compute_helpers.run_reduction('tsne', X, n_components=2, execution_mode=self.execution_mode, **tsneParams or {})
         if self.showPlots:
-            self.plot_helper.plot(plot_type="tsneplot", data=tsne_result, plot_params={
+            self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'tsne_plot_{args}_{method}.png'),
                 'title': 't-SNE Plot'
             })
-        return tsne_result
+        return tsne_result, kl_divergence
 
     def umap(self, *args: str, umapParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
@@ -310,6 +313,65 @@ class Ana:
                 'title': 'IVIS Plot'
             })
         return ivis_result
+    
+    
+    
+    def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
+        """
+        Performs Singular Value Decomposition (SVD) on the datasets.
+
+        Args:
+            *args (str): The labels to create the SVD from.
+            method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str, optional): The distance metric to use for computing pairwise distances. Default is 'euclidean'.
+            norm (str, optional): The normalization method to use. Default is 'ice'.
+            n_components (int, optional): Number of components to keep. Default is 2.
+
+        Returns:
+            tuple: (np.array, np.array, np.array) The SVD results, singular values, and right singular vectors.
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if n_components == -1:
+            n_components == self.compute_helpers.find_optimal_clusters(X)
+        svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components, self.execution_mode, n_jobs=-1)
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params={
+                'outputFileName': os.path.join(self.outPath, f'svd_plot_{args}_{method}_{metric}.png'),
+                'title': 'SVD Plot',
+                'n_components': n_components
+            })
+        return svd_result, singular_values, vt
+
+    def mds(self, *args: str, mdsParams: dict = None, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
+        """
+        Performs Multidimensional Scaling (MDS) on the datasets.
+
+        Args:
+            *args (str): The labels to create the MDS from.
+            mdsParams (dict, optional): Parameters for the MDS algorithm. Default is None.
+            sample_size (int, optional): The sample size for MDS. Default is 5000.
+            method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str, optional): The distance metric to use for computing pairwise distances. Default is 'euclidean'.
+            norm (str, optional): The normalization method to use. Default is 'ice'.
+            n_components (int, optional): Number of components to keep. Default is 2.
+
+        Returns:
+            tuple: (np.array, float, np.array) The MDS results, stress value, and dissimilarity matrix.
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if n_components == -1:
+            n_components = self.compute_helpers.find_optimal_clusters(X)
+            
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+        mds_result, stress, dissimilarity_matrix = self.compute_helpers.run_reduction('mds', X, n_components, self.execution_mode, **mdsParams or {})
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="mdsplot", data=(mds_result, stress, dissimilarity_matrix), plot_params={
+                'outputFileName': os.path.join(self.outPath, f'mds_plot_{args}_{method}_{metric}.png'),
+                'title': 'MDS Plot',
+                'n_components': n_components
+            })
+        return mds_result, stress, dissimilarity_matrix
     
     def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
@@ -489,6 +551,7 @@ class Ana:
             print(f"{label} has dist shape {dist.shape}")
             
             normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
+            flat_euclid_dist_map[label] = normalized_dist
             
             max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
@@ -501,7 +564,8 @@ class Ana:
         X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        Z = self.compute_helpers.hierarchical_clustering(X, method=method)
+        # Z = self.compute_helpers.hierarchical_clustering(X, method=method)
+        Z = linkage(X, method=method, metric='euclidean')
         
         np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
