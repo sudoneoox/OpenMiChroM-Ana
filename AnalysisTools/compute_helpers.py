@@ -5,8 +5,10 @@ from numba import jit, cuda
 from joblib import Parallel, delayed, Memory
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score, silhouette_samples
 from kneed import KneeLocator
-from sklearn.cluster import KMeans
-
+from sklearn.cluster import KMeans, DBSCAN, OPTICS
+from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.manifold import TSNE, MDS
+import umap
 class ComputeHelpers:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis.
@@ -23,6 +25,34 @@ class ComputeHelpers:
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
         self.CUDA_AVAILABLE = False
         self.cached_calc_dist = self.memory.cache(self._calc_dist_wrapper)
+        
+        self.reduction_methods = {
+            'pca': self._pca_reduction,
+            'svd': self._svd_reduction,
+            'tsne': self._tsne_reduction,
+            'umap': self._umap_reduction,
+            'mds': self._mds_reduction
+        }
+        
+        self.clustering_methods = {
+            'dbscan': self._dbscan_clustering,
+            'optics': self._optics_clustering
+        }
+        
+        self.distance_metrics = {
+            'euclidean': lambda x: squareform(pdist(x, metric='euclidean')),
+            'pearsons': self.pearson_distance,
+            'spearman': self.spearman_distance,
+            'contact': lambda x: squareform(pdist(x, metric='cityblock')),
+            "log2_contact": self.log2_contact_distance
+        }
+        
+        self.normalization_methods = {
+            'ice': self.ice_normalization,
+            'log_transform': lambda m: np.log2(m + 1),
+            'vc': lambda m: m / m.sum(axis=1, keepdims=True),
+            'kr': self.kr_norm,
+        }
 
     def set_cuda_availability(self, available):
         """
@@ -34,6 +64,8 @@ class ComputeHelpers:
         self.CUDA_AVAILABLE = available
         if self.CUDA_AVAILABLE:
             import cupy as cp
+            
+    '''#!========================================================== DATA LOADING AND PREPROCESSING ====================================================================================='''
 
     def getHiCData_simulation(self, filepath):
         """
@@ -117,9 +149,13 @@ class ComputeHelpers:
         slices = tuple(slice(0, dim) for dim in array.shape)
         result[slices] = array
         return result
+    
+    '''#!========================================================== DISTANCE CALCULATIONS ====================================================================================='''
+
 
     def calc_dist(self, X: np.array, metric: str) -> np.array:
-        """
+        """calc_dist
+        
         Calculate the distance matrix using the specified metric.
 
         Args:
@@ -129,17 +165,10 @@ class ComputeHelpers:
         Returns:
             np.array: The calculated distance matrix.
         """
-        metricPtrs = {
-            'euclidean': lambda x: squareform(pdist(x, metric='euclidean')),
-            'pearsons': self.pearson_distance,
-            'spearman': self.spearman_distance,
-            'contact': lambda x: squareform(pdist(x, metric='cityblock')),
-            "log2_contact": self.log2_contact_distance
-        }
         try:
-            return metricPtrs[metric](X)
+            return self.distance_metrics[metric](X)
         except KeyError:
-            raise KeyError(f"Invalid metric: {metric}. Available metrics are: {list(metricPtrs.keys())}")
+            raise KeyError(f"Invalid metric: {metric}. Available metrics are: {list(self.distance_metrics.keys())}")
 
     @cuda.jit
     def gpu_distance(self, traj, dist, metric):
@@ -164,25 +193,6 @@ class ComputeHelpers:
             elif metric == 'log2_contact':
                 dist[i, j] = self.gpu_log2_contact_distance(traj[i], traj[j])
 
-    def calc_distance_gpu(self, traj, metric):
-        """
-        Calculate distance matrix using GPU.
-
-        Args:
-            traj (np.array): The trajectory data.
-            metric (str): The distance metric to use.
-
-        Returns:
-            np.array: The calculated distance matrix.
-        """
-        traj = np.array(traj)
-        dist = np.zeros((traj.shape[0], traj.shape[0]), dtype=np.float32)
-        threadsperblock = (16, 16)
-        blockspergrid_x = (traj.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
-        blockspergrid_y = (traj.shape[0] + threadsperblock[1] - 1) // threadsperblock[1]
-        blockspergrid = (blockspergrid_x, blockspergrid_y)
-        self.gpu_distance[blockspergrid, threadsperblock](traj, dist, metric)
-        return dist
 
     def pearson_distance(self, X: np.array) -> np.array:
         """
@@ -222,30 +232,28 @@ class ComputeHelpers:
         """
         log2_X = np.log2(X + 1)
         return squareform(pdist(log2_X, metric='cityblock'))
-
-    def norm_distMatrix(self, matrix: np.array, norm: str):
+    
+    def calc_distance_gpu(self, traj, metric):
         """
-        Normalize the distance matrix using the specified method.
+        Calculate distance matrix using GPU.
 
         Args:
-            matrix (np.array): The input distance matrix.
-            norm (str): The normalization method to use.
+            traj (np.array): The trajectory data.
+            metric (str): The distance metric to use.
 
         Returns:
-            np.array: The normalized distance matrix.
+            np.array: The calculated distance matrix.
         """
-        normPtrs = {
-            'ice': self.ice_normalization,
-            'log_transform': lambda m: np.log2(m + 1),
-            'vc': lambda m: m / m.sum(axis=1, keepdims=True),
-            'kr': self.kr_norm,
-        }
-        try:
-            return normPtrs[norm](matrix)
-        except KeyError:
-            raise KeyError(f"Invalid normalization method: {norm}. Available methods are: {list(normPtrs.keys())}")
-
-    # GPU-specific distance calculation methods
+        traj = np.array(traj)
+        dist = np.zeros((traj.shape[0], traj.shape[0]), dtype=np.float32)
+        threadsperblock = (16, 16)
+        blockspergrid_x = (traj.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (traj.shape[0] + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+        self.gpu_distance[blockspergrid, threadsperblock](traj, dist, metric)
+        return dist
+    
+    # * GPU-specific distance calculation methods   
     @cuda.jit(device=True)
     def gpu_euclidean_distance(self, a, b):
         return np.sqrt(np.sum((a - b)**2))
@@ -282,7 +290,28 @@ class ComputeHelpers:
         log2_b = np.log2(b + 1)
         return np.sum(np.abs(log2_a - log2_b))
     
-    #CPU Multithreaded - specific norm calculations
+    
+    '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
+
+
+    def norm_distMatrix(self, matrix: np.array, norm: str):
+        """
+        Normalize the distance matrix using the specified method.
+
+        Args:
+            matrix (np.array): The input distance matrix.
+            norm (str): The normalization method to use.
+
+        Returns:
+            np.array: The normalized distance matrix.
+        """
+
+        try:
+            return self.normalization_methods[norm](matrix)
+        except KeyError:
+            raise KeyError(f"Invalid normalization method: {norm}. Available methods are: {list(self.normalization_methods.keys())}")
+
+    #!CPU Multithreaded - specific norm calculations
 
     @jit(nopython=True)
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
@@ -356,35 +385,90 @@ class ComputeHelpers:
             if np.sum(np.abs(bias - bias_old)) < tolerance:
                 break
         
-        return matrix_balanced
+        return matrix_balanced    
+    
+    '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
-    def _calc_dist_wrapper(self, trajectories, metric, execution_mode, n_jobs):
-        """
-        Wrapper function for calc_dist to be used with joblib caching.
-
-        Args:
-            trajectories (list): List of trajectory data.
-            metric (str): Distance metric to use.
-            execution_mode (str): 'cuda' for GPU, otherwise CPU.
-            n_jobs (int): Number of jobs for parallel CPU computation.
-
-        Returns:
-            list: List of distance matrices.
-        """
+    def run_reduction(self, method, X, n_components, execution_mode='cpu', n_jobs=-1):
+        try:
+            return self.reduction_methods[method](X, n_components, execution_mode, n_jobs)
+        except KeyError:
+            raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
+        
+    
+    def _pca_reduction(self, X, n_components, execution_mode, n_jobs):
         if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            return [self.calc_distance_gpu(traj, metric) for traj in trajectories]
+            return self._pca_reduction_gpu(X, n_components)
         else:
-            return Parallel(n_jobs=n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
+            return PCA(n_components=n_components).fit_transform(X)
 
-    def cached_calc_dist(self, trajectories, metric, execution_mode, n_jobs):
-        """
-        Calculate distance matrix with caching and potential GPU acceleration.
+    def _pca_reduction_gpu(self, X, n_components):
+        X_gpu = cp.array(X)
+        mean = cp.mean(X_gpu, axis=0)
+        X_centered = X_gpu - mean
+        U, S, V = cp.linalg.svd(X_centered, full_matrices=False)
+        components = V[:n_components].T
+        return cp.asnumpy(cp.dot(X_centered, components))
 
-        This method is now defined in __init__ using self.memory.cache
-        """
-        pass  # The actual implementation is now in _calc_dist_wrapper
+    def _svd_reduction(self, X, n_components, execution_mode, n_jobs):
+        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
+            return self._svd_reduction_gpu(X, n_components)
+        else:
+            return TruncatedSVD(n_components=n_components).fit_transform(X)
+
+    def _svd_reduction_gpu(self, X, n_components):
+        X_gpu = cp.array(X)
+        U, S, V = cp.linalg.svd(X_gpu, full_matrices=False)
+        return cp.asnumpy(cp.dot(X_gpu, V.T[:, :n_components]))
+
+    def _tsne_reduction(self, X, n_components, execution_mode, n_jobs):
+        return TSNE(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
+
+    def _umap_reduction(self, X, n_components, execution_mode, n_jobs):
+        return umap.UMAP(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
+
+    def _mds_reduction(self, X, n_components, execution_mode, n_jobs):
+        return MDS(n_components=n_components, n_jobs=n_jobs).fit_transform(X)
+    
 
 
+    '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
+
+    def run_clustering(self, method, X, execution_mode='cpu', n_jobs=-1, **kwargs):
+        try:
+            return self.clustering_methods[method](X, execution_mode=execution_mode, n_jobs=n_jobs, **kwargs)
+        except KeyError:
+            raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
+    
+    @cuda.jit
+    def _dbscan_kernel(X, eps, min_samples, labels):
+        i = cuda.grid(1)
+        if i < X.shape[0]:
+            neighbors = 0
+            for j in range(X.shape[0]):
+                if i != j and cp.sqrt(cp.sum((X[i] - X[j])**2)) <= eps:
+                    neighbors += 1
+            if neighbors >= min_samples:
+                labels[i] = 1
+            else:
+                labels[i] = -1
+
+    def _dbscan_clustering(self, X, eps, min_samples, execution_mode, n_jobs):
+        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
+            X_gpu = cp.array(X)
+            labels = cp.zeros(X.shape[0], dtype=cp.int32)
+            threads_per_block = 256
+            blocks = (X.shape[0] + (threads_per_block - 1)) // threads_per_block
+            self._dbscan_kernel[blocks, threads_per_block](X_gpu, eps, min_samples, labels)
+            return cp.asnumpy(labels)
+        else:
+            from sklearn.cluster import DBSCAN
+            return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=n_jobs).fit_predict(X)
+
+    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, execution_mode, n_jobs):
+        from sklearn.cluster import OPTICS
+        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=n_jobs).fit_predict(X)
+    
     def find_optimal_clusters(self, data, max_clusters=10):
             """
             Find the optimal number of clusters using the elbow method and silhouette score.
@@ -438,9 +522,52 @@ class ComputeHelpers:
         return silhouette, calinski_harabasz, davies_bouldin
     
     
+
     
-    """==================================================================== SETTERS/GETTERS =========================================================="""
+    
+    
+    
+    """==================================================================== UTILITY METHODS =========================================================="""
     
     def setMem(self, path: str, verbose: int = 0):
         self.memory = Memory(location=path, verbose=verbose)
  
+ 
+    def _calc_dist_wrapper(self, trajectories, metric, execution_mode, n_jobs):
+        """
+        Wrapper function for calc_dist to be used with joblib caching.
+
+        Args:
+            trajectories (list): List of trajectory data.
+            metric (str): Distance metric to use.
+            execution_mode (str): 'cuda' for GPU, otherwise CPU.
+            n_jobs (int): Number of jobs for parallel CPU computation.
+
+        Returns:
+            list: List of distance matrices.
+        """
+        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
+            return [self.calc_distance_gpu(traj, metric) for traj in trajectories]
+        else:
+            return Parallel(n_jobs=n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
+        
+    
+    def cached_calc_dist(self, trajectories, metric, execution_mode, n_jobs):
+        """
+        Calculate distance matrix with caching and potential GPU acceleration.
+
+        This method is now defined in __init__ using self.memory.cache
+        """
+        pass  # The actual implementation is now in _calc_dist_wrapper
+    
+    def getNormMethods(self):
+        return list(self.normalization_methods)
+    
+    def getDistanceMetrics(self):
+        return list(self.distance_metrics)
+    
+    def getClusteringMethods(self):
+        return list(self.clustering_methods)
+    
+    def getReductionMethods(self):
+        return list(self.reduction_methods)
