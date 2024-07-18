@@ -5,10 +5,65 @@ from numba import jit, cuda
 from joblib import Parallel, delayed, Memory
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score, silhouette_samples
 from kneed import KneeLocator
-from sklearn.cluster import KMeans, DBSCAN, OPTICS
+from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap
+
+
+
+@jit(nopython=True)
+def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
+    n = matrix.shape[0]
+    bias = np.ones(n)
+    matrix_balanced = matrix.copy()
+    
+    for _ in range(max_iter):
+        bias_old = bias.copy()
+        row_sums = matrix_balanced.sum(axis=1)
+        col_sums = matrix_balanced.sum(axis=0)
+        
+        for i in range(n):
+            if bias[i] != 0:
+                bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
+            else:
+                bias[i] = 1
+        
+        for i in range(n):
+            for j in range(n):
+                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+        
+        if np.sum(np.abs(bias - bias_old)) < tolerance:
+            break
+    
+    return matrix_balanced
+
+@jit(nopython=True)
+def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
+    n = matrix.shape[0]
+    bias = np.ones(n)
+    matrix_balanced = matrix.copy()
+    
+    for _ in range(max_iter):
+        bias_old = bias.copy()
+        row_sums = matrix_balanced.sum(axis=1)
+        col_sums = matrix_balanced.sum(axis=0)
+        
+        for i in range(n):
+            if bias[i] != 0:
+                bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
+            else:
+                bias[i] = 1
+        
+        for i in range(n):
+            for j in range(n):
+                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+        
+        if np.sum(np.abs(bias - bias_old)) < tolerance:
+            break
+    
+    return matrix_balanced
+
 class ComputeHelpers:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis.
@@ -24,7 +79,6 @@ class ComputeHelpers:
         """
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
         self.CUDA_AVAILABLE = False
-        self.cached_calc_dist = self.memory.cache(self._calc_dist_wrapper)
         
         self.reduction_methods = {
             'pca': self._pca_reduction,
@@ -36,21 +90,24 @@ class ComputeHelpers:
         
         self.clustering_methods = {
             'dbscan': self._dbscan_clustering,
-            'optics': self._optics_clustering
+            'optics': self._optics_clustering,
+            'hierarchical': self._hierarchical_clustering,
+            'spectral': self._spectral_clustering,
+            'kmeans': self._kmeans_clustering
         }
         
         self.distance_metrics = {
-            'euclidean': lambda x: squareform(pdist(x, metric='euclidean')),
+            'euclidean': self.euclidean_distance,
             'pearsons': self.pearson_distance,
             'spearman': self.spearman_distance,
-            'contact': lambda x: squareform(pdist(x, metric='cityblock')),
+            'contact': self.contact_distance,
             "log2_contact": self.log2_contact_distance
         }
         
         self.normalization_methods = {
             'ice': self.ice_normalization,
-            'log_transform': lambda m: np.log2(m + 1),
-            'vc': lambda m: m / m.sum(axis=1, keepdims=True),
+            'log_transform': self.log_transform,
+            'vc': self.vc_normalization,
             'kr': self.kr_norm,
         }
 
@@ -170,6 +227,7 @@ class ComputeHelpers:
         except KeyError:
             raise KeyError(f"Invalid metric: {metric}. Available metrics are: {list(self.distance_metrics.keys())}")
 
+   
     @cuda.jit
     def gpu_distance(self, traj, dist, metric):
         """
@@ -192,6 +250,12 @@ class ComputeHelpers:
                 dist[i, j] = self.gpu_contact_distance(traj[i], traj[j])
             elif metric == 'log2_contact':
                 dist[i, j] = self.gpu_log2_contact_distance(traj[i], traj[j])
+                
+    def euclidean_distance(self, x):
+        return squareform(pdist(x, metric='euclidean'))
+
+    def contact_distance(self, x):
+        return squareform(pdist(x, metric='cityblock'))
 
 
     def pearson_distance(self, X: np.array) -> np.array:
@@ -294,6 +358,8 @@ class ComputeHelpers:
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
 
 
+
+
     def norm_distMatrix(self, matrix: np.array, norm: str):
         """
         Normalize the distance matrix using the specified method.
@@ -304,53 +370,30 @@ class ComputeHelpers:
 
         Returns:
             np.array: The normalized distance matrix.
-        """
+        """        
+        normalization_methods = {
+            'ice': self.ice_normalization,
+            'log_transform': self.log_transform,
+            'vc': self.vc_normalization,
+            'kr': self.kr_norm,
+        }
 
         try:
-            return self.normalization_methods[norm](matrix)
+            return normalization_methods[norm](matrix)
         except KeyError:
             raise KeyError(f"Invalid normalization method: {norm}. Available methods are: {list(self.normalization_methods.keys())}")
 
     #!CPU Multithreaded - specific norm calculations
+    
+    def log_transform(self, m):
+        return np.log2(m + 1)
 
-    @jit(nopython=True)
+    def vc_normalization(self, m):
+        return m / m.sum(axis=1, keepdims=True)
+
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
-        """
-        Perform ICE normalization on a contact matrix.
+        return _ice_normalization_numba(matrix, max_iter, tolerance)
 
-        Args:
-            matrix (np.array): Raw contact matrix.
-            max_iter (int): Maximum number of iterations.
-            tolerance (float): Convergence tolerance.
-
-        Returns:
-            np.array: Normalized contact matrix.
-        """
-        n = matrix.shape[0]
-        bias = np.ones(n)
-        matrix_balanced = matrix.copy()
-        
-        for _ in range(max_iter):
-            bias_old = bias.copy()
-            row_sums = matrix_balanced.sum(axis=1)
-            col_sums = matrix_balanced.sum(axis=0)
-            
-            for i in range(n):
-                if bias[i] != 0:
-                    bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
-                else:
-                    bias[i] = 1
-            
-            for i in range(n):
-                for j in range(n):
-                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
-            
-            if np.sum(np.abs(bias - bias_old)) < tolerance:
-                break
-        
-        return matrix_balanced
-
-    @jit(nopython=True)
     def kr_norm(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
         """
         Perform KR normalization on a contact matrix.
@@ -363,29 +406,7 @@ class ComputeHelpers:
         Returns:
             np.array: Normalized contact matrix.
         """
-        n = matrix.shape[0]
-        bias = np.ones(n)
-        matrix_balanced = matrix.copy()
-        
-        for _ in range(max_iter):
-            bias_old = bias.copy()
-            row_sums = matrix_balanced.sum(axis=1)
-            col_sums = matrix_balanced.sum(axis=0)
-            
-            for i in range(n):
-                if bias[i] != 0:
-                    bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
-                else:
-                    bias[i] = 1
-            
-            for i in range(n):
-                for j in range(n):
-                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
-            
-            if np.sum(np.abs(bias - bias_old)) < tolerance:
-                break
-        
-        return matrix_balanced    
+        return _kr_norm_numba(matrix, max_iter, tolerance)
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
@@ -440,6 +461,18 @@ class ComputeHelpers:
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
     
+    def _kmeans_clustering(self, X: np.array, n_cluster: int, execution_mode: str, n_jobs: int):
+        return KMeans(n_clusters=n_cluster, n_jobs=n_jobs,).fit_predict(X)
+    
+    def _spectral_clustering(self, X, n_clusters, execution_mode, n_jobs):
+        from sklearn.cluster import SpectralClustering
+        return SpectralClustering(n_clusters=n_clusters, n_jobs=n_jobs).fit_predict(X)
+
+    def _hierarchical_clustering(self, X, n_clusters, execution_mode, n_jobs):
+        from scipy.cluster.hierarchy import linkage, fcluster
+        Z = linkage(X, method='ward')
+        return fcluster(Z, t=n_clusters, criterion='maxclust')
+    
     @cuda.jit
     def _dbscan_kernel(X, eps, min_samples, labels):
         i = cuda.grid(1)
@@ -469,7 +502,7 @@ class ComputeHelpers:
         from sklearn.cluster import OPTICS
         return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=n_jobs).fit_predict(X)
     
-    def find_optimal_clusters(self, data, max_clusters=10):
+    def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
             """
             Find the optimal number of clusters using the elbow method and silhouette score.
 
@@ -528,11 +561,9 @@ class ComputeHelpers:
     
     
     """==================================================================== UTILITY METHODS =========================================================="""
+   
     
-    def setMem(self, path: str, verbose: int = 0):
-        self.memory = Memory(location=path, verbose=verbose)
- 
- 
+    
     def _calc_dist_wrapper(self, trajectories, metric, execution_mode, n_jobs):
         """
         Wrapper function for calc_dist to be used with joblib caching.
@@ -542,24 +573,36 @@ class ComputeHelpers:
             metric (str): Distance metric to use.
             execution_mode (str): 'cuda' for GPU, otherwise CPU.
             n_jobs (int): Number of jobs for parallel CPU computation.
+            CUDA_AVAILABLE (bool): Whether CUDA is available for GPU computations.
 
         Returns:
             list: List of distance matrices.
         """
         if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            return [self.calc_distance_gpu(traj, metric) for traj in trajectories]
+            return [self.calc_distance_gpu(traj=traj, metric=metric) for traj in trajectories]
         else:
             return Parallel(n_jobs=n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
-        
-    
+
     def cached_calc_dist(self, trajectories, metric, execution_mode, n_jobs):
         """
-        Calculate distance matrix with caching and potential GPU acceleration.
+        Caches the calculation of distance matrices.
 
-        This method is now defined in __init__ using self.memory.cache
+        Args:
+            trajectories (list): List of trajectory data.
+            metric (str): Distance metric to use.
+            execution_mode (str): 'cuda' for GPU, otherwise CPU.
+            n_jobs (int): Number of jobs for parallel CPU computation.
+
+        Returns:
+            list: List of cached distance matrices.
         """
-        pass  # The actual implementation is now in _calc_dist_wrapper
-    
+        return self.memory.cache(self._calc_dist_wrapper)(
+            trajectories, 
+            metric, 
+            execution_mode, 
+            n_jobs
+        )
+        
     def getNormMethods(self):
         return list(self.normalization_methods)
     
@@ -571,3 +614,13 @@ class ComputeHelpers:
     
     def getReductionMethods(self):
         return list(self.reduction_methods)
+    
+    def getMemStats(self):
+        return [self.memory_location, self.memory_verb]
+    
+    def getCUDAAVAILABLE(self):
+        return self.CUDA_AVAILABLE
+    
+    def setMem(self, path: str, verbose: int = 0):
+        self.memory = Memory(location=path, verbose=verbose)
+        

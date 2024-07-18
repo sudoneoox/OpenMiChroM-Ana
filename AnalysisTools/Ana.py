@@ -38,7 +38,7 @@ class Ana:
         self.execution_mode = execution_mode
         self.showPlots = showPlots
         
-        self.compute_helpers = ComputeHelpers()
+      
     
         
         if self.showPlots:
@@ -56,16 +56,16 @@ class Ana:
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers.setMem(path='cache')
+            self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
             
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers.setMem(path=cacheStoragePath)
+            self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
         
         self.execution_mode = execution_mode
-        if self.execution_mode == 'cuda':
+        if self.execution_mode.lower() == 'cuda':
             try:
                 import cupy
                 self.compute_helpers.set_cuda_availability(True)
@@ -211,7 +211,7 @@ class Ana:
 
         return self.datasets[label]['distance_array']
 
-    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
         """
         Performs PCA on the datasets and returns the principal components and explained variance.
 
@@ -223,30 +223,16 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The principal components and the explained variance ratio.
         """
-        num_clusters = len(args)
-        flattened_distance_array, linkage_matrix = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-
-        threshold = linkage_matrix[-num_clusters, 2]
-        fclust = fcluster(linkage_matrix, t=threshold, criterion='distance')
-
-        pca = PCA(n_components=2)
-        principalComponents = pca.fit_transform(flattened_distance_array)
-        explained_variance_ratio = pca.explained_variance_ratio_
-        
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        pca_result = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode)
         if self.showPlots:
-            plot_params = {
-                'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}-{method}_{metric}.png'),
-                'title': 'PCA Plot',
-                'x_label': 'Principal Component 1',
-                'y_label': 'Principal Component 2'
-            }
-        self.plot_helper.plot(plot_type="pcaplot", 
-                              data=[principalComponents, explained_variance_ratio, fclust], 
-                              plot_params=plot_params)
+            self.plot_helper.plot(plot_type="pcaplot", data=pca_result, plot_params={
+                'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}_{method}_{metric}.png'),
+                'title': 'PCA Plot'
+            })
+        return pca_result
 
-        return principalComponents, explained_variance_ratio, fclust
-
-    def tsne(self, *args: str, tsneParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric:str = "euclidean", norm: str = 'ice') -> tuple:
+    def tsne(self, *args: str, tsneParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = "euclidean", norm: str = 'ice') -> tuple:        
         """
         Performs t-SNE on the datasets and returns the t-SNE results and clusters.
 
@@ -260,43 +246,16 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The t-SNE results and the clusters.
         """
-        if num_clusters == -1:
-            num_clusters = len(args)
-
-        default_tsne_params = {
-            'n_components': 2,
-            'verbose': 1,
-            'max_iter': 800,
-        }
-
-        if tsneParams != None:
-            default_tsne_params.update(tsneParams)
-
-        X, Z = self.calc_XZ(*args, method=method,metric=metric, norm=norm)
-
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-
-        n_samples = X.shape[0]
-        perplexity = min(30, max(5, n_samples // 10))
-        default_tsne_params['perplexity'] = perplexity
-
-        threshold = Z[-num_clusters, 2]
-        fclust = fcluster(Z, t=threshold, criterion='distance')
-
-        tsne = TSNE(**default_tsne_params)
-        tsne_res = tsne.fit_transform(X)
-        
+        tsne_result = self.compute_helpers.run_reduction('tsne', X, n_components=2, execution_mode=self.execution_mode, **tsneParams or {})
         if self.showPlots:
-            plot_params = {
+            self.plot_helper.plot(plot_type="tsneplot", data=tsne_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'tsne_plot_{args}_{method}.png'),
-                'title': 't-SNE Plot',
-                'x_label': 't-SNE 1',
-                'y_label': 't-SNE 2'
-            }
-        self.plot_helper.plot(plot_type="tsneplot", data=[tsne_res, fclust], plot_params=plot_params)
-
-        return tsne_res, fclust
+                'title': 't-SNE Plot'
+            })
+        return tsne_result
 
     def umap(self, *args: str, umapParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
@@ -312,39 +271,16 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The UMAP results and the clusters.
         """
-        if num_clusters == -1:
-            num_clusters = len(args)
-
-        default_umap_params = {
-            'n_neighbors': 15,
-            'min_dist': 0.1,
-            'n_components': 2,
-            'random_state': 42
-        }
-
-        if umapParams != None:
-            default_umap_params.update(umapParams)
-
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-
-        threshold = Z[-num_clusters, 2]
-        fclust = fcluster(Z, t=threshold, criterion='distance')
-
-        reducer = umap.UMAP(**default_umap_params)
-        umap_res = reducer.fit_transform(X)
-        
-        
+        umap_result = self.compute_helpers.run_reduction('umap', X, n_components=2, execution_mode=self.execution_mode, **umapParams or {})
         if self.showPlots:
-            plot_params = {
+            self.plot_helper.plot(plot_type="umapplot", data=umap_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'umap_plot_{args}_{method}.png'),
-                'title': 'UMAP Plot',
-                'x_label': 'UMAP 1',
-                'y_label': 'UMAP 2'
-            }
-        self.plot_helper.plot(plot_type="umapplot", data=[umap_res, fclust], plot_params=plot_params)
+                'title': 'UMAP Plot'
+            })
+        return umap_result
 
 
         return umap_res, fclust
@@ -364,45 +300,16 @@ class Ana:
         Returns:
             tuple: (np.array, np.array) The IVIS results and the clusters.
         """
-        if num_clusters == -1:
-            num_clusters = len(args)
-
-        default_ivis_params = {
-            'embedding_dims': 2,
-            'k': 15,
-            'epochs': 10,
-            'batch_size': 128,
-            'verbose': 1,
-        }
-
-        if ivisParams is not None:
-            default_ivis_params.update(ivisParams)
-
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-
-        threshold = Z[-num_clusters, 2]
-        fclust = fcluster(Z, t=threshold, criterion='distance')
-
-        if X.shape[0] < default_ivis_params['batch_size']:
-            default_ivis_params['batch_size'] = X.shape[0]
-
-        model = ivis.Ivis(**default_ivis_params)
-        ivis_res = model.fit_transform(X)
-        
+        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2, execution_mode=self.execution_mode, **ivisParams or {})
         if self.showPlots:
-            plot_params = {
+            self.plot_helper.plot(plot_type="ivisplot", data=ivis_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'ivis_plot_{args}_{method}.png'),
-                'title': 'IVIS Plot',
-                'x_label': 'IVIS 1',
-                'y_label': 'IVIS 2'
-            }
-        self.plot_helper.plot(plot_type="ivisplot", data=[ivis_res, fclust], plot_params=plot_params)
-
-
-        return ivis_res, fclust
+                'title': 'IVIS Plot'
+            })
+        return ivis_result
     
     def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         """
@@ -419,63 +326,147 @@ class Ana:
         Returns:
             tuple: (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, silhouette_avg, calinski_harabasz, davies_bouldin)
         """
-        default_spectral_params = {
-            'n_neighbors': 30,
-            'random_state': 42,
-            'assign_labels': 'kmeans'
-        }
-
-        if spectralParams != None:
-            default_spectral_params.update(spectralParams)
-
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-
-        if num_clusters == -1:
-            num_clusters = len(args)
-
-        # Improve affinity matrix calculation
-        n_neighbors = min(default_spectral_params['n_neighbors'], X.shape[0] - 1)
-        knn_graph = NearestNeighbors(n_neighbors=n_neighbors, metric="precomputed").fit(X).kneighbors_graph()
-        affinity_matrix = 0.5 * (knn_graph + knn_graph.T)
-        
-        # Use Gaussian kernel for affinity
-        sigma = np.mean(affinity_matrix.data)
-        affinity_matrix.data = np.exp(-affinity_matrix.data ** 2 / (2. * sigma ** 2))
-        
-        # Perform spectral clustering
-        sc = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', 
-                                random_state=default_spectral_params['random_state'], 
-                                assign_labels=default_spectral_params['assign_labels'])
-        cluster_labels = sc.fit_predict(affinity_matrix)
-        
-        # Compute Laplacian and its eigenvectors
-        laplacian = csgraph.laplacian(affinity_matrix, normed=True)
-        eigenvalues, eigenvectors = eigsh(laplacian, k=num_clusters, which='SM')
-        
-        # Compute clustering metrics
-        silhouette_avg, calinski_harabasz, davies_bouldin = self.compute_helpers.evaluate_clustering(X, cluster_labels)
-
-        results = (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, 
-                silhouette_avg, calinski_harabasz, davies_bouldin)
-
+        spectral_result = self.compute_helpers.run_clustering('spectral', X, execution_mode=self.execution_mode, n_clusters=num_clusters, **spectralParams or {})
         if self.showPlots:
-            plot_params = {
+            self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, spectral_result], plot_params={
                 'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
-                'title': 'Spectral Clustering Plot',
-            }
-            self.plot_helper._spectralclusteringplot(X, results, plot_params)
+                'title': 'Spectral Clustering Plot'
+            })
+        return spectral_result
+    
+    
+    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+        """
+        Performs K-means clustering on the datasets.
 
-        return results
+        Args:
+            *args: (str): The labels to perform clustering on.
+            n_clusters (int): Number of clusters. Default is 5.
+            sample_size (int): The sample size for clustering. Default is 5000.
+            method (str): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str): The distance metric to use. Default is 'euclidean'.
+            norm (str): The normalization method. Default is 'ice'.
+            **kwargs: Additional arguments for KMeans.
+
+        Returns:
+            tuple: (cluster_labels, cluster_centers)
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+        
+        kmeans_result = self.compute_helpers.run_clustering('kmeans', X, execution_mode=self.execution_mode, n_clusters=n_clusters, **kwargs)
+        
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="kmeans", data=[X, kmeans_result[0]], plot_params={
+                'outputFileName': os.path.join(self.outPath, f'kmeans_clustering_plot_{args}_{method}_{metric}.png'),
+                'title': 'K-means Clustering Plot'
+            })
+        
+        return kmeans_result
+
+    def dbscan_clustering(self, *args: str, eps: float = 0.5, min_samples: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+        """
+        Performs DBSCAN clustering on the datasets.
+
+        Args:
+            *args: (str): The labels to perform clustering on.
+            eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other. Default is 0.5.
+            min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point. Default is 5.
+            sample_size (int): The sample size for clustering. Default is 5000.
+            method (str): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str): The distance metric to use. Default is 'euclidean'.
+            norm (str): The normalization method. Default is 'ice'.
+            **kwargs: Additional arguments for DBSCAN.
+
+        Returns:
+            np.array: Cluster labels
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+        
+        dbscan_result = self.compute_helpers.run_clustering('dbscan', X, execution_mode=self.execution_mode, eps=eps, min_samples=min_samples, **kwargs)
+        
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="dbscan", data=[X, dbscan_result], plot_params={
+                'outputFileName': os.path.join(self.outPath, f'dbscan_clustering_plot_{args}_{method}_{metric}.png'),
+                'title': 'DBSCAN Clustering Plot'
+            })
+        
+        return dbscan_result
+
+    def hierarchical_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'ward', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+        """
+        Performs hierarchical clustering on the datasets.
+
+        Args:
+            *args: (str): The labels to perform clustering on.
+            n_clusters (int): Number of clusters. Default is 5.
+            sample_size (int): The sample size for clustering. Default is 5000.
+            method (str): The linkage method to use. Default is 'ward'.
+            metric (str): The distance metric to use. Default is 'euclidean'.
+            norm (str): The normalization method. Default is 'ice'.
+            **kwargs: Additional arguments for hierarchical clustering.
+
+        Returns:
+            np.array: Cluster labels
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+        
+        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X, execution_mode=self.execution_mode, n_clusters=n_clusters, linkage_method=method, **kwargs)
+        
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="hierarchical", data=[X, hierarchical_result], plot_params={
+                'outputFileName': os.path.join(self.outPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}.png'),
+                'title': 'Hierarchical Clustering Plot'
+            })
+        
+        return hierarchical_result
+
+    def optics_clustering(self, *args: str, min_samples: int = 5, xi: float = 0.05, min_cluster_size: float = 0.05, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+        """
+        Performs OPTICS clustering on the datasets.
+
+        Args:
+            *args: (str): The labels to perform clustering on.
+            min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point. Default is 5.
+            xi (float): Determines the minimum steepness on the reachability plot that constitutes a cluster boundary. Default is 0.05.
+            min_cluster_size (float): Minimum number of samples in an OPTICS cluster. Default is 0.05.
+            sample_size (int): The sample size for clustering. Default is 5000.
+            method (str): The method for hierarchical clustering. Default is 'weighted'.
+            metric (str): The distance metric to use. Default is 'euclidean'.
+            norm (str): The normalization method. Default is 'ice'.
+            **kwargs: Additional arguments for OPTICS.
+
+        Returns:
+            np.array: Cluster labels
+        """
+        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        if X.shape[0] > sample_size:
+            X = resample(X, n_samples=sample_size, random_state=42)
+        
+        optics_result = self.compute_helpers.run_clustering('optics', X, execution_mode=self.execution_mode, min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
+        
+        if self.showPlots:
+            self.plot_helper.plot(plot_type="optics", data=[X, optics_result], plot_params={
+                'outputFileName': os.path.join(self.outPath, f'optics_clustering_plot_{args}_{method}_{metric}.png'),
+                'title': 'OPTICS Clustering Plot'
+            })
+        
+        return optics_result
+
 
     """=========================================UTILITIES========================================"""
 
     def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', n_jobs: int = -1, norm: str = 'ice') -> tuple:
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
-        
         try:
             cached_data = np.load(cache_file + ".npz", allow_pickle=True)
             print(f"using cached data: {cache_file}.npz")
@@ -489,7 +480,7 @@ class Ana:
         for label in args:
             print(f'Processing {label}')
             trajectories = self.datasets[label]['trajectories']
-            if trajectories != None or len(trajectories) == 0:
+            if trajectories is None or len(trajectories) == 0:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
@@ -497,9 +488,7 @@ class Ana:
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
             
-            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix, norm=norm) for matrix in dist])
-            self.datasets[label]["distance_array"] = normalized_dist
-            flat_euclid_dist_map[label] = normalized_dist
+            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
             
             max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
@@ -512,12 +501,12 @@ class Ana:
         X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        Z = linkage(X, method=method, metric='euclidean')
+        Z = self.compute_helpers.hierarchical_clustering(X, method=method)
         
         np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
-    
-    
+        
+        
     
     
     """ ============================================================= Getters/Setters ============================================================================================"""
