@@ -1,5 +1,3 @@
-from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
-from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
 from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 
@@ -67,8 +65,10 @@ class Ana:
         
         self.execution_mode = execution_mode
         if execution_mode.lower() == "cuda":
+            from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
             self.compute_helpers = ComputeHelpersGPU()
         elif execution_mode.lower() == "cpu":
+            from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
             self.compute_helpers = ComputeHelpers()
         else:
             print("Execution mode not valid. Options are cpu/cuda")

@@ -15,6 +15,11 @@ OpenMiChroM-Ana is a Python package for analyzing chromosome structure data. It 
 
 ## Installation
 
+### Prerequisites
+- Python 3.12
+- For GPU support: CUDA toolkit 11.8 or higher
+
+
 ### CPU Version
 
 To install the CPU-only version of OpenMiChroM-Ana, run:
@@ -25,46 +30,46 @@ pip install .
 
 ### GPU Version
 
-To install the GPU-acceleratred version (requires CUDA-enabled GPU), run:
+The GPU version requires CUDA and the RAPIDS suite of libraries. Follow these steps:
+- Install CUDA toolkit
+- create new conda or venv environment
 
+```bash
+conda create -n [envName] python=3.12
+conda activate [envName]
+```
+
+- Install RAPIDS Library
+```bash
+conda install -c rapidsai -c nvidia -c conda-forge cudf=23.08 cuml=23.08 cugraph=23.08 cudatoolkit=11.8
+```
+
+- Install OpenMiChroM-Ana with GPU support:
 ```bash
 pip install .[gpu]
 ```
-Note: Make sure you have the appropiate CUDA Toolkit isntalled for GPU support.
 
-### Requirements
-<ol>
-    <li> Python 3.6+ </li>
-    <li> numpy </li>
-    <li> scipy </li>
-    <li> scikit-learn </li>
-    <li> joblib </li>
-    <li> numba </li>
-    <li> matplotlib </li>
-    <li> seaborn </li>
-    <li> umap-learn </li>
-    <li> kneed </li>
-    <li> pandas </li>
-</ol>
 
-### Additional requirements for GPU support
-
-<ol>
-    <li> cupy </li>
-    <li> cuml </li>
-    <li> cugraph </li>
-    <li> cudf </li>
-</ol>
-
-### Usage
+## Usage
 Here's a basic example of how to use OpenMiChroM-Ana:
 
+### For CPU Usage
+```python
+from OpenMiChroM_Ana import Ana
+
+# Initialize the analysis object
+analysis = Ana(showPlots=True, execution_mode='cpu', cacheStoragePath='/path/to/cache')
+```
+### For GPU Usage
 ```python
 from OpenMiChroM_Ana import Ana
 
 # Initialize the analysis object
 analysis = Ana(showPlots=True, execution_mode='gpu', cacheStoragePath='/path/to/cache')
+```
 
+### Example
+```python
 # Add datasets
 analysis.add_dataset(label="Dataset1", folder="data/Dataset1")
 analysis.add_dataset(label='Dataset2', folder='data/Dataset2')

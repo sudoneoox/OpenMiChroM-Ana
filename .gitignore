@@ -9,6 +9,7 @@ test/data/*/iteration_*/*.pdb
 test/data/*/iteration_*/log
 test/data/*/iteration_*/*h5
 test/data/*/iteration_*/*.dat
+test/Analysis/*
 AnalysisTools/__pycache__/
 TODO
 *.plz.npx
