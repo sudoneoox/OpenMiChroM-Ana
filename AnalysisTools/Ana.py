@@ -1,5 +1,6 @@
-from AnalysisTools.compute_helpers import ComputeHelpers
-from AnalysisTools.plot_helpers import PlotHelper
+from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
+from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
+from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 
 from sklearn.cluster import SpectralClustering
@@ -65,18 +66,13 @@ class Ana:
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
         
         self.execution_mode = execution_mode
-        if self.execution_mode.lower() == 'cuda':
-            try:
-                import cupy
-                self.compute_helpers.set_cuda_availability(True)
-                print("CUDA is available and will be used for computations.")
-            except ImportError:
-                print("CUDA requested but CuPy not found. Falling back to CPU.")
-                self.execution_mode = 'cpu'
-                self.compute_helpers.set_cuda_availability(False)
+        if execution_mode.lower() == "cuda":
+            self.compute_helpers = ComputeHelpersGPU()
+        elif execution_mode.lower() == "cpu":
+            self.compute_helpers = ComputeHelpers()
         else:
-            self.compute_helpers.set_cuda_availability(False)
-
+            print("Execution mode not valid. Options are cpu/cuda")
+            exit()
 
     def add_dataset(self, label: str, folder: str):
         """add_dataset
