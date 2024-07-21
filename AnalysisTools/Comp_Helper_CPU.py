@@ -1,43 +1,71 @@
 import numpy as np
 from sklearn.preprocessing import normalize
 from scipy.spatial.distance import pdist, squareform
-from numba import jit, cuda
 from joblib import Parallel, delayed, Memory
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score, silhouette_samples
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
 from kneed import KneeLocator
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap.umap_ as umap
+from numba import jit
+from concurrent.futures import ThreadPoolExecutor
+import os
 
 @jit(nopython=True)
 def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
+    """
+    Perform ICE normalization using Numba for improved performance.
+    
+    Args:
+        matrix (np.array): Input matrix to normalize.
+        max_iter (int): Maximum number of iterations.
+        tolerance (float): Convergence tolerance.
+    
+    Returns:
+        np.array: Normalized matrix.
+    """
     n = matrix.shape[0]
     bias = np.ones(n)
     matrix_balanced = matrix.copy()
-    
+
     for _ in range(max_iter):
         bias_old = bias.copy()
         row_sums = matrix_balanced.sum(axis=1)
         col_sums = matrix_balanced.sum(axis=0)
         
         for i in range(n):
-            if bias[i] != 0:
+            if bias[i] != 0 and row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
                 bias[i] = 1
         
         for i in range(n):
             for j in range(n):
-                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                else:
+                    matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
     
     return matrix_balanced
 
+
 @jit(nopython=True)
 def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
+    """
+    Perform KR normalization using Numba for improved performance.
+    
+    Args:
+        matrix (np.array): Input matrix to normalize.
+        max_iter (int): Maximum number of iterations.
+        tolerance (float): Convergence tolerance.
+    
+    Returns:
+        np.array: Normalized matrix.
+    """
     n = matrix.shape[0]
     bias = np.ones(n)
     matrix_balanced = matrix.copy()
@@ -48,23 +76,27 @@ def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
         col_sums = matrix_balanced.sum(axis=0)
         
         for i in range(n):
-            if bias[i] != 0:
+            if bias[i] != 0 and row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
                 bias[i] = 1
         
         for i in range(n):
             for j in range(n):
-                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                else:
+                    matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
-     
+    
     return matrix_balanced
 
 class ComputeHelpers:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis.
+    This version supports multithreading for improved performance on CPU.
     """
 
     def __init__(self, memory_location: str = '.', memory_verbosity: int = 0):
@@ -76,7 +108,7 @@ class ComputeHelpers:
             memory_verbosity (int): The verbosity level for memory caching.
         """
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
-        self.CUDA_AVAILABLE = False
+        self.n_jobs = os.cpu_count()  # Default to using all available cores
         
         self.reduction_methods = {
             'pca': self._pca_reduction,
@@ -109,17 +141,15 @@ class ComputeHelpers:
             'kr': self.kr_norm,
         }
 
-    def set_cuda_availability(self, available):
+    def set_n_jobs(self, n_jobs: int):
         """
-        Set the availability of CUDA for GPU computations.
+        Set the number of jobs for parallel processing.
 
         Args:
-            available (bool): Whether CUDA is available.
+            n_jobs (int): Number of jobs to run in parallel. -1 means using all processors.
         """
-        self.CUDA_AVAILABLE = available
-        if self.CUDA_AVAILABLE:
-            import cupy as cp
-            
+        self.n_jobs = n_jobs if n_jobs > 0 else os.cpu_count()
+
     '''#!========================================================== DATA LOADING AND PREPROCESSING ====================================================================================='''
 
     def getHiCData_simulation(self, filepath):
@@ -163,7 +193,6 @@ class ComputeHelpers:
         r[np.isnan(r)] = 0.0
         r = normalize(r, axis=1, norm="max")
         
-        # Apply first normalization if specified
         if norm == "first":
             for i in range(len(r) - 1):
                 maxElem = r[i][i + 1]
@@ -207,10 +236,8 @@ class ComputeHelpers:
     
     '''#!========================================================== DISTANCE CALCULATIONS ====================================================================================='''
 
-
     def calc_dist(self, X: np.array, metric: str) -> np.array:
-        """calc_dist
-        
+        """
         Calculate the distance matrix using the specified metric.
 
         Args:
@@ -221,40 +248,34 @@ class ComputeHelpers:
             np.array: The calculated distance matrix.
         """
         try:
-            return self.distance_metrics[metric](X)
+            with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                return executor.submit(self.distance_metrics[metric], X).result()
         except KeyError:
             raise KeyError(f"Invalid metric: {metric}. Available metrics are: {list(self.distance_metrics.keys())}")
 
-   
-    @cuda.jit
-    def gpu_distance(self, traj, dist, metric):
+    def euclidean_distance(self, x):
         """
-        CUDA kernel for calculating distances on GPU.
+        Calculate the Euclidean distance matrix.
 
         Args:
-            traj (np.array): The trajectory data.
-            dist (np.array): The output distance matrix.
-            metric (str): The distance metric to use.
+            x (np.array): Input data.
+
+        Returns:
+            np.array: Euclidean distance matrix.
         """
-        i, j = cuda.grid(2)
-        if i < traj.shape[0] and j < traj.shape[0]:
-            if metric == 'euclidean':
-                dist[i, j] = self.gpu_euclidean_distance(traj[i], traj[j])
-            elif metric == 'pearson':
-                dist[i, j] = self.gpu_pearson_distance(traj[i], traj[j])
-            elif metric == 'spearman':
-                dist[i, j] = self.gpu_spearman_distance(traj[i], traj[j])
-            elif metric == 'contact':
-                dist[i, j] = self.gpu_contact_distance(traj[i], traj[j])
-            elif metric == 'log2_contact':
-                dist[i, j] = self.gpu_log2_contact_distance(traj[i], traj[j])
-                
-    def euclidean_distance(self, x):
         return squareform(pdist(x, metric='euclidean'))
 
     def contact_distance(self, x):
-        return squareform(pdist(x, metric='cityblock'))
+        """
+        Calculate the contact distance matrix.
 
+        Args:
+            x (np.array): Input data.
+
+        Returns:
+            np.array: Contact distance matrix.
+        """
+        return squareform(pdist(x, metric='cityblock'))
 
     def pearson_distance(self, X: np.array) -> np.array:
         """
@@ -266,9 +287,12 @@ class ComputeHelpers:
         Returns:
             np.array: The Pearson correlation distance matrix.
         """
-        corr = np.corrcoef(X)
+        mean = np.mean(X, axis=1, keepdims=True)
+        std = np.std(X, axis=1, keepdims=True)
+        normalized_X = self.safe_divide(X - mean, std)
+        corr = np.dot(normalized_X, normalized_X.T) / X.shape[1]
         return 1 - corr
-
+    
     def spearman_distance(self, X: np.array) -> np.array:
         """
         Calculate Spearman correlation distance.
@@ -280,7 +304,7 @@ class ComputeHelpers:
             np.array: The Spearman correlation distance matrix.
         """
         rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
-        return 1 - np.corrcoef(rank_data)
+        return self.pearson_distance(rank_data)
 
     def log2_contact_distance(self, X: np.array) -> np.array:
         """
@@ -292,71 +316,12 @@ class ComputeHelpers:
         Returns:
             np.array: The log2 contact distance matrix.
         """
-        log2_X = np.log2(X + 1)
+        epsilon = np.finfo(float).eps
+        log2_X = np.log2(X + epsilon)
+        log2_X[~np.isfinite(log2_X)] = 0
         return squareform(pdist(log2_X, metric='cityblock'))
     
-    def calc_distance_gpu(self, traj, metric):
-        """
-        Calculate distance matrix using GPU.
-
-        Args:
-            traj (np.array): The trajectory data.
-            metric (str): The distance metric to use.
-
-        Returns:
-            np.array: The calculated distance matrix.
-        """
-        traj = np.array(traj)
-        dist = np.zeros((traj.shape[0], traj.shape[0]), dtype=np.float32)
-        threadsperblock = (16, 16)
-        blockspergrid_x = (traj.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
-        blockspergrid_y = (traj.shape[0] + threadsperblock[1] - 1) // threadsperblock[1]
-        blockspergrid = (blockspergrid_x, blockspergrid_y)
-        self.gpu_distance[blockspergrid, threadsperblock](traj, dist, metric)
-        return dist
-    
-    # * GPU-specific distance calculation methods   
-    @cuda.jit(device=True)
-    def gpu_euclidean_distance(self, a, b):
-        return np.sqrt(np.sum((a - b)**2))
-
-    @cuda.jit(device=True)
-    def gpu_pearson_distance(self, a, b):
-        mean_a = np.mean(a)
-        mean_b = np.mean(b)
-        std_a = np.sqrt(np.sum((a - mean_a)**2) / (len(a) - 1))
-        std_b = np.sqrt(np.sum((b - mean_b)**2) / (len(b) - 1))
-        cov = np.sum((a - mean_a) * (b - mean_b)) / (len(a) - 1)
-        return 1 - (cov / (std_a * std_b))
-
-    @cuda.jit(device=True)
-    def gpu_spearman_distance(self, a, b):
-        def rank(x):
-            temp = sorted(enumerate(x), key=lambda x: x[1])
-            ranks = [0] * len(x)
-            for i, (index, value) in enumerate(temp):
-                ranks[index] = i
-            return ranks
-        
-        rank_a = rank(a)
-        rank_b = rank(b)
-        return self.gpu_pearson_distance(rank_a, rank_b)
-
-    @cuda.jit(device=True)
-    def gpu_contact_distance(self, a, b):
-        return np.sum(np.abs(a - b))
-
-    @cuda.jit(device=True)
-    def gpu_log2_contact_distance(self, a, b):
-        log2_a = np.log2(a + 1)
-        log2_b = np.log2(b + 1)
-        return np.sum(np.abs(log2_a - log2_b))
-    
-    
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
-
-
-
 
     def norm_distMatrix(self, matrix: np.array, norm: str):
         """
@@ -369,27 +334,48 @@ class ComputeHelpers:
         Returns:
             np.array: The normalized distance matrix.
         """        
-        normalization_methods = {
-            'ice': self.ice_normalization,
-            'log_transform': self.log_transform,
-            'vc': self.vc_normalization,
-            'kr': self.kr_norm,
-        }
-
         try:
-            return normalization_methods[norm](matrix)
+            return self.normalization_methods[norm](matrix)
         except KeyError:
             raise KeyError(f"Invalid normalization method: {norm}. Available methods are: {list(self.normalization_methods.keys())}")
 
-    #!CPU Multithreaded - specific norm calculations
-    
     def log_transform(self, m):
+        """
+        Perform log transformation on the input matrix.
+
+        Args:
+            m (np.array): Input matrix.
+
+        Returns:
+            np.array: Log-transformed matrix.
+        """
         return np.log2(m + 1)
 
     def vc_normalization(self, m):
-        return m / m.sum(axis=1, keepdims=True)
+        """
+        Perform variance stabilizing normalization on the input matrix.
+
+        Args:
+            m (np.array): Input matrix.
+
+        Returns:
+            np.array: Normalized matrix.
+        """
+        return self.save_divide(m, m.sum(axis=1, keepdims=True))
+
 
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
+        """
+        Perform ICE normalization on the input matrix.
+
+        Args:
+            matrix (np.array): Input matrix.
+            max_iter (int): Maximum number of iterations.
+            tolerance (float): Convergence tolerance.
+
+        Returns:
+            np.array: ICE normalized matrix.
+        """
         return _ice_normalization_numba(matrix, max_iter, tolerance)
 
     def kr_norm(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
@@ -408,141 +394,238 @@ class ComputeHelpers:
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
-    def run_reduction(self, method, X, n_components, execution_mode='cpu', n_jobs=-1):
+    def run_reduction(self, method, X, n_components):
+        """
+        Run the specified dimensionality reduction method.
+
+        Args:
+            method (str): The reduction method to use.
+            X (np.array): Input data.
+            n_components (int): Number of components for the reduction.
+            n_jobs (int): Number of jobs to run in parallel.
+
+        Returns:
+            tuple: Reduced data and additional information (if available).
+        """
         try:
-            return self.reduction_methods[method](X, n_components, execution_mode, n_jobs)
+            with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                return executor.submit(self.reduction_methods[method], X, n_components, self.n_jobs).result()
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
-        
-    
-    def _pca_reduction(self, X, n_components, execution_mode, n_jobs):
-        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            return self._pca_reduction_gpu(X, n_components)
-        else:
-            pca = PCA(n_components=n_components)
-            result = pca.fit_transform(X)
-            return result, pca.explained_variance_ratio_, pca.components_
 
+    def _pca_reduction(self, X, n_components):
+        """
+        Perform PCA reduction.
 
-    def _pca_reduction_gpu(self, X, n_components):
-        X_gpu = cp.array(X)
-        mean = cp.mean(X_gpu, axis=0)
-        X_centered = X_gpu - mean
-        U, S, V = cp.linalg.svd(X_centered, full_matrices=False)
-        components = V[:n_components].T
-        result = cp.asnumpy(cp.dot(X_centered, components))
-        explained_variance_ratio = (S[:n_components]**2) / (S**2).sum()
-        return result, explained_variance_ratio, components
+        Args:
+            X (np.array): Input data.
+            n_components (int): Number of components.
+            n_jobs (int): Number of jobs to run in parallel.
 
-    def _svd_reduction(self, X, n_components, execution_mode, n_jobs):
-        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            return self._svd_reduction_gpu(X, n_components)
-        else:
-            svd = TruncatedSVD(n_components=n_components)
-            result = svd.fit_transform(X)
-            return result
+        Returns:
+            tuple: PCA result, explained variance ratio, and components.
+        """
+        pca = PCA(n_components=n_components)
+        result = pca.fit_transform(X)
+        return result, pca.explained_variance_ratio_, pca.components_
 
-    def _svd_reduction_gpu(self, X, n_components):
-        X_gpu = cp.array(X)
-        U, S, V = cp.linalg.svd(X_gpu, full_matrices=False)
-        result = cp.asnumpy(cp.dot(X_gpu, V.T[:, :n_components]))
+    def _svd_reduction(self, X, n_components):
+        """
+        Perform SVD reduction.
+
+        Args:
+            X (np.array): Input data.
+            n_components (int): Number of components.
+            n_jobs (int): Number of jobs to run in parallel.
+
+        Returns:
+            np.array: SVD result.
+        """
+        svd = TruncatedSVD(n_components=n_components)
+        result = svd.fit_transform(X)
         return result
 
-    def _tsne_reduction(self, X, n_components, execution_mode, n_jobs):
-        tsne = TSNE(n_components=n_components, n_jobs=n_jobs)
-        result = tsne.fit_transform(X)
-        return result, tsne.kl_divergence_, None
-    
-    def _umap_reduction(self, X, n_components, execution_mode, n_jobs):
-        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=n_jobs)
+    def _tsne_reduction(self, X, n_components):
+            """
+            Perform t-SNE reduction.
+
+            Args:
+                X (np.array): Input data.
+                n_components (int): Number of components.
+                n_jobs (int): Number of jobs to run in parallel.
+
+            Returns:
+                tuple: t-SNE result, KL divergence, and None (for consistency with other methods).
+            """
+            tsne = TSNE(n_components=n_components, n_jobs=self.n_jobs)
+            result = tsne.fit_transform(X)
+            return result, tsne.kl_divergence_, None
+
+    def _umap_reduction(self, X, n_components):
+        """
+        Perform UMAP reduction.
+
+        Args:
+            X (np.array): Input data.
+            n_components (int): Number of components.
+            n_jobs (int): Number of jobs to run in parallel.
+
+        Returns:
+            tuple: UMAP result, embedding, and graph.
+        """
+        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=self.n_jobs)
         result = umap_reducer.fit_transform(X)
         return result, umap_reducer.embedding_, umap_reducer.graph_
 
+    def _mds_reduction(self, X, n_components):
+        """
+        Perform MDS reduction.
 
-    def _mds_reduction(self, X, n_components, execution_mode, n_jobs):
-        mds = MDS(n_components=n_components, n_jobs=n_jobs)
+        Args:
+            X (np.array): Input data.
+            n_components (int): Number of components.
+            n_jobs (int): Number of jobs to run in parallel.
+
+        Returns:
+            tuple: MDS result, stress, and dissimilarity matrix.
+        """
+        mds = MDS(n_components=n_components, n_jobs=self.n_jobs)
         result = mds.fit_transform(X)
         return result, mds.stress_, mds.dissimilarity_matrix_
 
-
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, execution_mode='cpu', n_jobs=-1, **kwargs):
+    def run_clustering(self, method, X, **kwargs):
+        """
+        Run the specified clustering method.
+
+        Args:
+            method (str): The clustering method to use.
+            X (np.array): Input data.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for the clustering method.
+
+        Returns:
+            np.array: Cluster labels.
+        """
         try:
-            return self.clustering_methods[method](X, execution_mode=execution_mode, n_jobs=n_jobs, **kwargs)
+            with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                return executor.submit(self.clustering_methods[method], X, n_jobs=self.n_jobs, **kwargs).result()
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
-    
-    def _kmeans_clustering(self, X: np.array, n_cluster: int, execution_mode: str, n_jobs: int):
-        return KMeans(n_clusters=n_cluster, n_jobs=n_jobs,).fit_predict(X)
-    
-    def _spectral_clustering(self, X, n_clusters, execution_mode, n_jobs):
+
+    def _kmeans_clustering(self, X: np.array, n_clusters: int, **kwargs):
+        """
+        Perform K-means clustering.
+
+        Args:
+            X (np.array): Input data.
+            n_clusters (int): Number of clusters.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for KMeans.
+
+        Returns:
+            np.array: Cluster labels.
+        """
+        return KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+
+    def _spectral_clustering(self, X, n_clusters, **kwargs):
+        """
+        Perform Spectral clustering.
+
+        Args:
+            X (np.array): Input data.
+            n_clusters (int): Number of clusters.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for SpectralClustering.
+
+        Returns:
+            np.array: Cluster labels.
+        """
         from sklearn.cluster import SpectralClustering
-        return SpectralClustering(n_clusters=n_clusters, n_jobs=n_jobs).fit_predict(X)
+        return SpectralClustering(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
 
-    def _hierarchical_clustering(self, X, n_clusters, execution_mode, n_jobs):
+    def _hierarchical_clustering(self, X, n_clusters, **kwargs):
+        """
+        Perform Hierarchical clustering.
+
+        Args:
+            X (np.array): Input data.
+            n_clusters (int): Number of clusters.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for linkage and fcluster.
+
+        Returns:
+            np.array: Cluster labels.
+        """
         from scipy.cluster.hierarchy import linkage, fcluster
-        Z = linkage(X, method='ward')
+        Z = linkage(X, method=kwargs.get('method', 'ward'), metric=kwargs.get('metric', 'euclidean'))
         return fcluster(Z, t=n_clusters, criterion='maxclust')
-    
-    @cuda.jit
-    def _dbscan_kernel(X, eps, min_samples, labels):
-        i = cuda.grid(1)
-        if i < X.shape[0]:
-            neighbors = 0
-            for j in range(X.shape[0]):
-                if i != j and cp.sqrt(cp.sum((X[i] - X[j])**2)) <= eps:
-                    neighbors += 1
-            if neighbors >= min_samples:
-                labels[i] = 1
-            else:
-                labels[i] = -1
 
-    def _dbscan_clustering(self, X, eps, min_samples, execution_mode, n_jobs):
-        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            X_gpu = cp.array(X)
-            labels = cp.zeros(X.shape[0], dtype=cp.int32)
-            threads_per_block = 256
-            blocks = (X.shape[0] + (threads_per_block - 1)) // threads_per_block
-            self._dbscan_kernel[blocks, threads_per_block](X_gpu, eps, min_samples, labels)
-            return cp.asnumpy(labels)
-        else:
-            from sklearn.cluster import DBSCAN
-            return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=n_jobs).fit_predict(X)
+    def _dbscan_clustering(self, X, eps, min_samples, **kwargs):
+        """
+        Perform DBSCAN clustering.
 
-    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, execution_mode, n_jobs):
+        Args:
+            X (np.array): Input data.
+            eps (float): The maximum distance between two samples for one to be considered as in the neighborhood of the other.
+            min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for DBSCAN.
+
+        Returns:
+            np.array: Cluster labels.
+        """
+        from sklearn.cluster import DBSCAN
+        return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+
+    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, **kwargs):
+        """
+        Perform OPTICS clustering.
+
+        Args:
+            X (np.array): Input data.
+            min_samples (int): The number of samples in a neighborhood for a point to be considered as a core point.
+            xi (float): Determines the minimum steepness on the reachability plot that constitutes a cluster boundary.
+            min_cluster_size (int): Minimum number of samples in an OPTICS cluster.
+            n_jobs (int): Number of jobs to run in parallel.
+            **kwargs: Additional arguments for OPTICS.
+
+        Returns:
+            np.array: Cluster labels.
+        """
         from sklearn.cluster import OPTICS
-        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=n_jobs).fit_predict(X)
-    
+        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+
     def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
-            """
-            Find the optimal number of clusters using the elbow method and silhouette score.
+        """
+        Find the optimal number of clusters using the elbow method and silhouette score.
 
-            Args:
-                data (np.array): Input data for clustering.
-                max_clusters (int): Maximum number of clusters to consider.
+        Args:
+            data (np.array): Input data for clustering.
+            max_clusters (int): Maximum number of clusters to consider.
 
-            Returns:
-                int: Optimal number of clusters.
-            """
-            inertias = []
-            silhouette_scores = []
-            
-            for k in range(2, max_clusters + 1):
-                kmeans = KMeans(n_clusters=k, random_state=42)
-                kmeans.fit(data)
-                inertias.append(kmeans.inertia_)
-                silhouette_scores.append(silhouette_score(data, kmeans.labels_))
-            
-            # Use the elbow method to find the optimal number of clusters
-            kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
-            elbow = kl.elbow if kl.elbow else max_clusters
-            
-            # Find the number of clusters with the highest silhouette score
-            silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
-            
-            # Return the smaller of the two to be conservative
-            return min(elbow, silhouette_optimal)
+        Returns:
+            int: Optimal number of clusters.
+        """
+        inertias = []
+        silhouette_scores = []
+        
+        for k in range(2, max_clusters + 1):
+            kmeans = KMeans(n_clusters=k, random_state=42)
+            kmeans.fit(data)
+            inertias.append(kmeans.inertia_)
+            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
+        
+        # Use the elbow method to find the optimal number of clusters
+        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
+        elbow = kl.elbow if kl.elbow else max_clusters
+        
+        # Find the number of clusters with the highest silhouette score
+        silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
+        
+        # Return the smaller of the two to be conservative
+        return min(elbow, silhouette_optimal)
 
     def evaluate_clustering(self, data, labels):
         """
@@ -565,74 +648,61 @@ class ComputeHelpers:
         print(f"  Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
         
         return silhouette, calinski_harabasz, davies_bouldin
-    
-    
 
-    
-    
-    
-    
     """==================================================================== UTILITY METHODS =========================================================="""
-   
-    
-    
-    def _calc_dist_wrapper(self, trajectories, metric, execution_mode, n_jobs):
+
+    def _calc_dist_wrapper(self, trajectories, metric):
         """
         Wrapper function for calc_dist to be used with joblib caching.
 
         Args:
             trajectories (list): List of trajectory data.
             metric (str): Distance metric to use.
-            execution_mode (str): 'cuda' for GPU, otherwise CPU.
-            n_jobs (int): Number of jobs for parallel CPU computation.
-            CUDA_AVAILABLE (bool): Whether CUDA is available for GPU computations.
+            n_jobs (int): Number of jobs for parallel computation.
 
         Returns:
             list: List of distance matrices.
-        """
-        if execution_mode == 'cuda' and self.CUDA_AVAILABLE:
-            return [self.calc_distance_gpu(traj=traj, metric=metric) for traj in trajectories]
-        else:
-            return Parallel(n_jobs=n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
+        """        
+        return Parallel(n_jobs=self.n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
 
-    def cached_calc_dist(self, trajectories, metric, execution_mode, n_jobs):
+    def cached_calc_dist(self, trajectories, metric):
         """
         Caches the calculation of distance matrices.
 
         Args:
             trajectories (list): List of trajectory data.
             metric (str): Distance metric to use.
-            execution_mode (str): 'cuda' for GPU, otherwise CPU.
-            n_jobs (int): Number of jobs for parallel CPU computation.
+            n_jobs (int): Number of jobs for parallel computation.
 
         Returns:
             list: List of cached distance matrices.
         """
-        return self.memory.cache(self._calc_dist_wrapper)(
-            trajectories, 
-            metric, 
-            execution_mode, 
-            n_jobs
-        )
-        
+        return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric)
+
     def getNormMethods(self):
+        """Get the list of available normalization methods."""
         return list(self.normalization_methods)
     
     def getDistanceMetrics(self):
+        """Get the list of available distance metrics."""
         return list(self.distance_metrics)
     
     def getClusteringMethods(self):
+        """Get the list of available clustering methods."""
         return list(self.clustering_methods)
     
     def getReductionMethods(self):
+        """Get the list of available dimensionality reduction methods."""
         return list(self.reduction_methods)
     
     def getMemStats(self):
-        return [self.memory_location, self.memory_verb]
-    
-    def getCUDAAVAILABLE(self):
-        return self.CUDA_AVAILABLE
+        """Get memory statistics."""
+        return [self.memory.location, self.memory.verbose]
     
     def setMem(self, path: str, verbose: int = 0):
+        """Set memory location and verbosity."""
         self.memory = Memory(location=path, verbose=verbose)
-        
+    
+    def save_divide(self, a, b):
+        """Safely divide two ararays, returning 0 where division by zero would occur"""
+        return np.divide(a, b, out=np.zeros_like(a), where=b!=0)

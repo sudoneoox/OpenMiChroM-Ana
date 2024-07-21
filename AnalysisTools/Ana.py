@@ -1,5 +1,4 @@
-from AnalysisTools.compute_helpers import ComputeHelpers
-from AnalysisTools.plot_helpers import PlotHelper
+from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 
 from sklearn.cluster import SpectralClustering
@@ -37,10 +36,6 @@ class Ana:
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
         self.showPlots = showPlots
-        
-      
-    
-        
         if self.showPlots:
             self.plot_helper = PlotHelper()
         else:
@@ -53,6 +48,18 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
+        
+        self.execution_mode = execution_mode
+        if execution_mode.lower() == "cuda":
+            # from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
+            # self.compute_helpers = ComputeHelpersGPU()
+            pass
+        elif execution_mode.lower() == "cpu":
+            from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
+            self.compute_helpers = ComputeHelpers()
+        else:
+            print("Execution mode not valid. Options are cpu/cuda")
+            exit()
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
@@ -63,21 +70,8 @@ class Ana:
             os.makedirs(self.cache_path, exist_ok=True)
             self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
-        
-        self.execution_mode = execution_mode
-        if self.execution_mode.lower() == 'cuda':
-            try:
-                import cupy
-                self.compute_helpers.set_cuda_availability(True)
-                print("CUDA is available and will be used for computations.")
-            except ImportError:
-                print("CUDA requested but CuPy not found. Falling back to CPU.")
-                self.execution_mode = 'cpu'
-                self.compute_helpers.set_cuda_availability(False)
-        else:
-            self.compute_helpers.set_cuda_availability(False)
-
-
+            
+            
     def add_dataset(self, label: str, folder: str):
         """add_dataset
         
@@ -226,7 +220,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if n_components == -1:
             n_components = self.compute_helpers.find_optimal_clusters(X, 15)
-        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode, n_jobs=-1)
+        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode)
         if self.showPlots:
             self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}_{method}_{metric}.png'),
@@ -252,7 +246,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        tsne_result, kl_divergence, _ = self.compute_helpers.run_reduction('tsne', X, n_components=2, execution_mode=self.execution_mode, **tsneParams or {})
+        tsne_result, kl_divergence, _ = self.compute_helpers.run_reduction('tsne', X, n_components=2,  **tsneParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'tsne_plot_{args}_{method}.png'),
@@ -277,7 +271,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        umap_result = self.compute_helpers.run_reduction('umap', X, n_components=2, execution_mode=self.execution_mode, **umapParams or {})
+        umap_result = self.compute_helpers.run_reduction('umap', X, n_components=2,  **umapParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="umapplot", data=umap_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'umap_plot_{args}_{method}.png'),
@@ -306,7 +300,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2, execution_mode=self.execution_mode, **ivisParams or {})
+        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2,  **ivisParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="ivisplot", data=ivis_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'ivis_plot_{args}_{method}.png'),
@@ -333,7 +327,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if n_components == -1:
             n_components == self.compute_helpers.find_optimal_clusters(X)
-        svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components, self.execution_mode, n_jobs=-1)
+        svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components, self.execution_mode)
         if self.showPlots:
             self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'svd_plot_{args}_{method}_{metric}.png'),
@@ -391,7 +385,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        spectral_result = self.compute_helpers.run_clustering('spectral', X, execution_mode=self.execution_mode, n_clusters=num_clusters, **spectralParams or {})
+        spectral_result = self.compute_helpers.run_clustering('spectral', X,  n_clusters=num_clusters, **spectralParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, spectral_result], plot_params={
                 'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
@@ -420,7 +414,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        kmeans_result = self.compute_helpers.run_clustering('kmeans', X, execution_mode=self.execution_mode, n_clusters=n_clusters, **kwargs)
+        kmeans_result = self.compute_helpers.run_clustering('kmeans', X,  n_clusters=n_clusters, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="kmeans", data=[X, kmeans_result[0]], plot_params={
@@ -451,7 +445,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        dbscan_result = self.compute_helpers.run_clustering('dbscan', X, execution_mode=self.execution_mode, eps=eps, min_samples=min_samples, **kwargs)
+        dbscan_result = self.compute_helpers.run_clustering('dbscan', X,  eps=eps, min_samples=min_samples, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="dbscan", data=[X, dbscan_result], plot_params={
@@ -481,7 +475,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X, execution_mode=self.execution_mode, n_clusters=n_clusters, linkage_method=method, **kwargs)
+        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X,  n_clusters=n_clusters, linkage_method=method, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="hierarchical", data=[X, hierarchical_result], plot_params={
@@ -513,7 +507,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        optics_result = self.compute_helpers.run_clustering('optics', X, execution_mode=self.execution_mode, min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
+        optics_result = self.compute_helpers.run_clustering('optics', X,  min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="optics", data=[X, optics_result], plot_params={
@@ -526,12 +520,28 @@ class Ana:
 
     """=========================================UTILITIES========================================"""
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', n_jobs: int = -1, norm: str = 'ice') -> tuple:
+
+
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+        """
+        Calculate and cache the distance matrix and linkage matrix for given datasets.
+
+        Args:
+            *args (str): Labels of the datasets to process.
+            method (str): The linkage method to use.
+            metric (str): The distance metric to use.
+            norm (str): The normalization method to use.
+
+        Returns:
+            tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
+        """
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
+        
+        # Try to load cached data
         try:
             cached_data = np.load(cache_file + ".npz", allow_pickle=True)
-            print(f"using cached data: {cache_file}.npz")
+            print(f"Using cached data: {cache_file}.npz")
             return cached_data['X'], cached_data['Z']
         except FileNotFoundError:
             print(f"No cached data, creating cache file {cache_file}")
@@ -546,32 +556,67 @@ class Ana:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
-            dist = self.compute_helpers.cached_calc_dist(trajectories, metric, self.execution_mode, n_jobs)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
+            
+            # Handle infinite values
+            inf_mask = np.isinf(dist)
+            if np.any(inf_mask):
+                print(f"Warning: Infinite values found in distance matrix for {label}. Replacing with large finite value.")
+                large_finite = np.finfo(dist.dtype).max / 2
+                dist[inf_mask] = large_finite
+            
+            # Handle NaN values (likely centromere regions)
+            nan_mask = np.isnan(dist)
+            if np.any(nan_mask):
+                print(f"Warning: NaN values found in distance matrix for {label}. These are likely centromere regions.")
+                # Replace NaNs with the mean of non-NaN values
+                dist[nan_mask] = np.nanmean(dist)
             
             normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
             flat_euclid_dist_map[label] = normalized_dist
             
             max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
-        padded_flat_euclid_dist_map = {label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) for val in sublist] for label, sublist in flat_euclid_dist_map.items()}
+        # Pad arrays to ensure consistent shapes
+        padded_flat_euclid_dist_map = {
+            label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) 
+                    for val in sublist] 
+            for label, sublist in flat_euclid_dist_map.items()
+        }
         
-        flat_euclid_dist_map = {label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
-                                        for val in range(len(padded_flat_euclid_dist_map[label]))]
-                                for label in args}
+        # Flatten and stack distance matrices
+        flat_euclid_dist_map = {
+            label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
+                    for val in range(len(padded_flat_euclid_dist_map[label]))]
+            for label in args
+        }
         
         X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        # Z = self.compute_helpers.hierarchical_clustering(X, method=method)
-        Z = linkage(X, method=method, metric='euclidean')
+        # Final check for non-finite values
+        non_finite_mask = ~np.isfinite(X)
+        if np.any(non_finite_mask):
+            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+            X[non_finite_mask] = np.nanmean(X)
         
+        
+        # Perform linkage
+        try:
+            Z = linkage(X, method=method, metric='euclidean')
+        except ValueError as e:
+            print(f"Error in linkage: {e}")
+            print("Attempting to proceed with available finite values...")
+            # Create a mask for finite values
+            finite_mask = np.isfinite(X)
+            X_finite = X[finite_mask]
+            Z = linkage(X_finite, method=method, metric='euclidean')
+        
+        # Cache the results
         np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
-        
-        
-    
     
     """ ============================================================= Getters/Setters ============================================================================================"""
 
