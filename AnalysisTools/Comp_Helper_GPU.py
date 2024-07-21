@@ -157,44 +157,31 @@ class ComputeHelpersGPU:
 
     def euclidean_distance(self, x):
         """Calculate the Euclidean distance matrix on GPU."""
-        result = self.squareform(pdist(x, metric='euclidean'))
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in Euclidean distance calculation (GPU)")
-        return result
-
+        return self.squareform(pdist(x, metric='euclidean'))
+    
     def contact_distance(self, x):
         """Calculate the contact distance matrix on GPU."""
-        result = self.squareform(pdist(x, metric='cityblock'))
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in contact distance calculation (GPU)")
-        return result
+        return self.squareform(pdist(x, metric='cityblock'))
 
     def pearson_distance(self, X: cp.array) -> cp.array:
         """Calculate Pearson correlation distance on GPU."""
-        corr = cp.corrcoef(X)
-        result = 1 - corr
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in Pearson distance calculation (GPU)")
-        return result
+        mean = cp.mean(X, axis=1, keepdims=True)
+        std = cp.std(X, axis=1, keepdims=True)
+        normalized_X = self.safe_divide(X - mean, std)
+        corr = cp.dot(normalized_X, normalized_X.T) / X.shape[1]
+        return 1 - corr
 
     def spearman_distance(self, X: cp.array) -> cp.array:
         """Calculate Spearman correlation distance on GPU."""
         rank_data = cp.apply_along_axis(lambda x: cp.argsort(cp.argsort(x)), 1, X)
-        corr = cp.corrcoef(rank_data)
-        result = 1 - corr
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in Spearman distance calculation (GPU)")
-        return result
+        return self.pearson_distance(rank_data)
     
     def log2_contact_distance(self, X: cp.array) -> cp.array:
         """Calculate log2 contact distance on GPU."""
         epsilon = cp.finfo(float).eps
         log2_X = cp.log2(X + epsilon)
         log2_X[~cp.isfinite(log2_X)] = 0
-        result = self.squareform(pdist(log2_X, metric='cityblock'))
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in log2 contact distance calculation (GPU)")
-        return result
+        return self.squareform(pdist(log2_X, metric='cityblock'))
     
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
 
@@ -220,10 +207,7 @@ class ComputeHelpersGPU:
 
     def vc_normalization(self, m):
         """Perform variance stabilizing normalization on GPU."""
-        result = m / m.sum(axis=1, keepdims=True)
-        if cp.any(~cp.isfinite(result)):
-            print("Warning: Non-finite values in VC normalization (GPU)")
-        return result
+        return self.safe_divide(m, m.sum(axis=1, keepdims=True))
 
     @cuda.jit
     def _ice_normalization_kernel(matrix, bias, max_iter, tolerance):
@@ -260,11 +244,40 @@ class ComputeHelpersGPU:
         
         return matrix_balanced
 
+    @cuda.jit
+    def _kr_normalization_kernel(matrix, bias, max_iter, tolerance):
+        """CUDA kernel for KR normalization."""
+        i, j = cuda.grid(2)
+        if i < matrix.shape[0] and j < matrix.shape[1]:
+            for _ in range(max_iter):
+                old_bias = bias[i]
+                row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
+                col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
+                if bias[i] != 0:
+                    bias[i] *= cp.sqrt(row_sum * col_sum)
+                else:
+                    bias[i] = 1
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                else:
+                    matrix[i, j] = 0
+                if abs(bias[i] - old_bias) < tolerance:
+                    break
+
     def kr_norm(self, matrix: cp.array, max_iter: int=100, tolerance: float=1e-5) -> cp.array:
         """Perform KR normalization on GPU."""
-        # Implement KR normalization using CUDA kernel (similar to ICE normalization)
-        # This is a placeholder and needs to be implemented
-        return matrix
+        n = matrix.shape[0]
+        bias = cp.ones(n)
+        matrix_balanced = matrix.copy()
+        
+        threadsperblock = (16, 16)
+        blockspergrid_x = (matrix.shape[0] + threadsperblock[0] - 1) // threadsperblock[0]
+        blockspergrid_y = (matrix.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
+        blockspergrid = (blockspergrid_x, blockspergrid_y)
+        
+        self._kr_normalization_kernel[blockspergrid, threadsperblock](matrix_balanced, bias, max_iter, tolerance)
+        
+        return matrix_balanced
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
@@ -504,3 +517,6 @@ class ComputeHelpersGPU:
         dist_matrix[cp.triu_indices(n, k=1)] = distances
         dist_matrix = dist_matrix + dist_matrix.T
         return dist_matrix
+    
+    def safe_divide(self, a, b):
+        return cp.divide(a, b, out=cp.zeros_like(a), where=b!=0)

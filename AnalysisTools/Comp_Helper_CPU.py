@@ -28,17 +28,16 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
     n = matrix.shape[0]
     bias = np.ones(n)
     matrix_balanced = matrix.copy()
-    
+
     for _ in range(max_iter):
         bias_old = bias.copy()
         row_sums = matrix_balanced.sum(axis=1)
         col_sums = matrix_balanced.sum(axis=0)
         
         for i in range(n):
-            if row_sums[i] != 0 and col_sums[i] != 0:
+            if bias[i] != 0 and row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
-                print(f"division of zero setting {bias[i]} to one")
                 bias[i] = 1
         
         for i in range(n):
@@ -46,13 +45,13 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
                 if bias[i] != 0 and bias[j] != 0:
                     matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
                 else:
-                    print(f"division of zero setting {matrix_balanced[i, j]} to zero")
                     matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
     
     return matrix_balanced
+
 
 @jit(nopython=True)
 def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
@@ -77,18 +76,21 @@ def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
         col_sums = matrix_balanced.sum(axis=0)
         
         for i in range(n):
-            if bias[i] != 0:
+            if bias[i] != 0 and row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
                 bias[i] = 1
         
         for i in range(n):
             for j in range(n):
-                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                else:
+                    matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
-     
+    
     return matrix_balanced
 
 class ComputeHelpers:
@@ -261,11 +263,7 @@ class ComputeHelpers:
         Returns:
             np.array: Euclidean distance matrix.
         """
-        with np.errstate(divide='ignore', invalid='ignore'):
-            result = squareform(pdist(x, metric='euclidean'))
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in Euclidean distance calculation")
-            return result
+        return squareform(pdist(x, metric='euclidean'))
 
     def contact_distance(self, x):
         """
@@ -277,12 +275,7 @@ class ComputeHelpers:
         Returns:
             np.array: Contact distance matrix.
         """
-        with np.errstate(divide='ignore', invalid='ignore'):
-            result = squareform(pdist(x, metric='cityblock'))
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in Euclidean distance calculation")
-
-            return result
+        return squareform(pdist(x, metric='cityblock'))
 
     def pearson_distance(self, X: np.array) -> np.array:
         """
@@ -294,13 +287,12 @@ class ComputeHelpers:
         Returns:
             np.array: The Pearson correlation distance matrix.
         """
-        with np.errstate(divide='ignore', invalid='ignore'):
-            corr = np.corrcoef(X)
-            result = 1 - corr
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in Pearson distance calculation")
-            return result
-
+        mean = np.mean(X, axis=1, keepdims=True)
+        std = np.std(X, axis=1, keepdims=True)
+        normalized_X = self.safe_divide(X - mean, std)
+        corr = np.dot(normalized_X, normalized_X.T) / X.shape[1]
+        return 1 - corr
+    
     def spearman_distance(self, X: np.array) -> np.array:
         """
         Calculate Spearman correlation distance.
@@ -311,13 +303,8 @@ class ComputeHelpers:
         Returns:
             np.array: The Spearman correlation distance matrix.
         """
-        with np.errstate(divide='ignore', invalid='ignore'):
-            rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
-            corr = np.corrcoef(rank_data)
-            result = 1 - corr
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in Spearman distance calculation")
-            return result
+        rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
+        return self.pearson_distance(rank_data)
 
     def log2_contact_distance(self, X: np.array) -> np.array:
         """
@@ -330,13 +317,9 @@ class ComputeHelpers:
             np.array: The log2 contact distance matrix.
         """
         epsilon = np.finfo(float).eps
-        with np.errstate(divide='ignore', invalid='ignore'):
-            log2_X = np.log2(X + epsilon)
-            log2_X[~np.isfinite(log2_X)] = 0
-            result = squareform(pdist(log2_X, metric='cityblock'))
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in log2 contact distance calculation")
-            return result
+        log2_X = np.log2(X + epsilon)
+        log2_X[~np.isfinite(log2_X)] = 0
+        return squareform(pdist(log2_X, metric='cityblock'))
     
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
 
@@ -378,11 +361,7 @@ class ComputeHelpers:
         Returns:
             np.array: Normalized matrix.
         """
-        with np.errstate(divide='ignore', invalid='ignore'):
-            result = m / m.sum(axis=1, keepdims=True)
-            if np.any(~np.isfinite(result)):
-                print("Warning: Non-finite values in VC normalization")
-            return result
+        return self.save_divide(m, m.sum(axis=1, keepdims=True))
 
 
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
@@ -723,3 +702,7 @@ class ComputeHelpers:
     def setMem(self, path: str, verbose: int = 0):
         """Set memory location and verbosity."""
         self.memory = Memory(location=path, verbose=verbose)
+    
+    def save_divide(self, a, b):
+        """Safely divide two ararays, returning 0 where division by zero would occur"""
+        return np.divide(a, b, out=np.zeros_like(a), where=b!=0)
