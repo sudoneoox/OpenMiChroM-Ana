@@ -38,7 +38,7 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
             if row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
-                print(f"division of zero setting {matrix_balanced[i, j]} to one")
+                print(f"division of zero setting {bias[i]} to one")
                 bias[i] = 1
         
         for i in range(n):
@@ -261,7 +261,11 @@ class ComputeHelpers:
         Returns:
             np.array: Euclidean distance matrix.
         """
-        return squareform(pdist(x, metric='euclidean'))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            result = squareform(pdist(x, metric='euclidean'))
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in Euclidean distance calculation")
+            return result
 
     def contact_distance(self, x):
         """
@@ -273,7 +277,12 @@ class ComputeHelpers:
         Returns:
             np.array: Contact distance matrix.
         """
-        return squareform(pdist(x, metric='cityblock'))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            result = squareform(pdist(x, metric='cityblock'))
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in Euclidean distance calculation")
+
+            return result
 
     def pearson_distance(self, X: np.array) -> np.array:
         """
@@ -285,8 +294,12 @@ class ComputeHelpers:
         Returns:
             np.array: The Pearson correlation distance matrix.
         """
-        corr = np.corrcoef(X)
-        return 1 - corr
+        with np.errstate(divide='ignore', invalid='ignore'):
+            corr = np.corrcoef(X)
+            result = 1 - corr
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in Pearson distance calculation")
+            return result
 
     def spearman_distance(self, X: np.array) -> np.array:
         """
@@ -298,8 +311,13 @@ class ComputeHelpers:
         Returns:
             np.array: The Spearman correlation distance matrix.
         """
-        rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
-        return 1 - np.corrcoef(rank_data)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
+            corr = np.corrcoef(rank_data)
+            result = 1 - corr
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in Spearman distance calculation")
+            return result
 
     def log2_contact_distance(self, X: np.array) -> np.array:
         """
@@ -311,8 +329,14 @@ class ComputeHelpers:
         Returns:
             np.array: The log2 contact distance matrix.
         """
-        log2_X = np.log2(X + 1)
-        return squareform(pdist(log2_X, metric='cityblock'))
+        epsilon = np.finfo(float).eps
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log2_X = np.log2(X + epsilon)
+            log2_X[~np.isfinite(log2_X)] = 0
+            result = squareform(pdist(log2_X, metric='cityblock'))
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in log2 contact distance calculation")
+            return result
     
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
 
@@ -354,7 +378,12 @@ class ComputeHelpers:
         Returns:
             np.array: Normalized matrix.
         """
-        return m / m.sum(axis=1, keepdims=True)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            result = m / m.sum(axis=1, keepdims=True)
+            if np.any(~np.isfinite(result)):
+                print("Warning: Non-finite values in VC normalization")
+            return result
+
 
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
         """
@@ -654,7 +683,7 @@ class ComputeHelpers:
 
         Returns:
             list: List of distance matrices.
-        """
+        """        
         return Parallel(n_jobs=self.n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
 
     def cached_calc_dist(self, trajectories, metric):
@@ -669,7 +698,7 @@ class ComputeHelpers:
         Returns:
             list: List of cached distance matrices.
         """
-        return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric, self.n_jobs)
+        return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric)
 
     def getNormMethods(self):
         """Get the list of available normalization methods."""

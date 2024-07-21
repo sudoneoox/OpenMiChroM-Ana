@@ -520,12 +520,28 @@ class Ana:
 
     """=========================================UTILITIES========================================"""
 
+
+
     def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+        """
+        Calculate and cache the distance matrix and linkage matrix for given datasets.
+
+        Args:
+            *args (str): Labels of the datasets to process.
+            method (str): The linkage method to use.
+            metric (str): The distance metric to use.
+            norm (str): The normalization method to use.
+
+        Returns:
+            tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
+        """
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
+        
+        # Try to load cached data
         try:
             cached_data = np.load(cache_file + ".npz", allow_pickle=True)
-            print(f"using cached data: {cache_file}.npz")
+            print(f"Using cached data: {cache_file}.npz")
             return cached_data['X'], cached_data['Z']
         except FileNotFoundError:
             print(f"No cached data, creating cache file {cache_file}")
@@ -540,32 +556,67 @@ class Ana:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
-            dist = self.compute_helpers.cached_calc_dist(trajectories, metric)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
+            
+            # Handle infinite values
+            inf_mask = np.isinf(dist)
+            if np.any(inf_mask):
+                print(f"Warning: Infinite values found in distance matrix for {label}. Replacing with large finite value.")
+                large_finite = np.finfo(dist.dtype).max / 2
+                dist[inf_mask] = large_finite
+            
+            # Handle NaN values (likely centromere regions)
+            nan_mask = np.isnan(dist)
+            if np.any(nan_mask):
+                print(f"Warning: NaN values found in distance matrix for {label}. These are likely centromere regions.")
+                # Replace NaNs with the mean of non-NaN values
+                dist[nan_mask] = np.nanmean(dist)
             
             normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
             flat_euclid_dist_map[label] = normalized_dist
             
             max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
-        padded_flat_euclid_dist_map = {label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) for val in sublist] for label, sublist in flat_euclid_dist_map.items()}
+        # Pad arrays to ensure consistent shapes
+        padded_flat_euclid_dist_map = {
+            label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) 
+                    for val in sublist] 
+            for label, sublist in flat_euclid_dist_map.items()
+        }
         
-        flat_euclid_dist_map = {label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
-                                        for val in range(len(padded_flat_euclid_dist_map[label]))]
-                                for label in args}
+        # Flatten and stack distance matrices
+        flat_euclid_dist_map = {
+            label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
+                    for val in range(len(padded_flat_euclid_dist_map[label]))]
+            for label in args
+        }
         
         X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        # Z = self.compute_helpers.hierarchical_clustering(X, method=method)
-        Z = linkage(X, method=method, metric='euclidean')
+        # Final check for non-finite values
+        non_finite_mask = ~np.isfinite(X)
+        if np.any(non_finite_mask):
+            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+            X[non_finite_mask] = np.nanmean(X)
         
+        
+        # Perform linkage
+        try:
+            Z = linkage(X, method=method, metric='euclidean')
+        except ValueError as e:
+            print(f"Error in linkage: {e}")
+            print("Attempting to proceed with available finite values...")
+            # Create a mask for finite values
+            finite_mask = np.isfinite(X)
+            X_finite = X[finite_mask]
+            Z = linkage(X_finite, method=method, metric='euclidean')
+        
+        # Cache the results
         np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
-        
-        
-    
     
     """ ============================================================= Getters/Setters ============================================================================================"""
 

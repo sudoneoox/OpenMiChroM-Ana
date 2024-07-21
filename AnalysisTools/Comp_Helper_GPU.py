@@ -157,26 +157,44 @@ class ComputeHelpersGPU:
 
     def euclidean_distance(self, x):
         """Calculate the Euclidean distance matrix on GPU."""
-        return squareform(pdist(x, metric='euclidean'))
+        result = self.squareform(pdist(x, metric='euclidean'))
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in Euclidean distance calculation (GPU)")
+        return result
 
     def contact_distance(self, x):
         """Calculate the contact distance matrix on GPU."""
-        return squareform(pdist(x, metric='cityblock'))
+        result = self.squareform(pdist(x, metric='cityblock'))
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in contact distance calculation (GPU)")
+        return result
 
     def pearson_distance(self, X: cp.array) -> cp.array:
         """Calculate Pearson correlation distance on GPU."""
         corr = cp.corrcoef(X)
-        return 1 - corr
+        result = 1 - corr
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in Pearson distance calculation (GPU)")
+        return result
 
     def spearman_distance(self, X: cp.array) -> cp.array:
         """Calculate Spearman correlation distance on GPU."""
         rank_data = cp.apply_along_axis(lambda x: cp.argsort(cp.argsort(x)), 1, X)
-        return 1 - cp.corrcoef(rank_data)
-
+        corr = cp.corrcoef(rank_data)
+        result = 1 - corr
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in Spearman distance calculation (GPU)")
+        return result
+    
     def log2_contact_distance(self, X: cp.array) -> cp.array:
         """Calculate log2 contact distance on GPU."""
-        log2_X = cp.log2(X + 1)
-        return squareform(pdist(log2_X, metric='cityblock'))
+        epsilon = cp.finfo(float).eps
+        log2_X = cp.log2(X + epsilon)
+        log2_X[~cp.isfinite(log2_X)] = 0
+        result = self.squareform(pdist(log2_X, metric='cityblock'))
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in log2 contact distance calculation (GPU)")
+        return result
     
     '''#!========================================================== NORMALIZATION METHODS ====================================================================================='''
 
@@ -202,7 +220,10 @@ class ComputeHelpersGPU:
 
     def vc_normalization(self, m):
         """Perform variance stabilizing normalization on GPU."""
-        return m / m.sum(axis=1, keepdims=True)
+        result = m / m.sum(axis=1, keepdims=True)
+        if cp.any(~cp.isfinite(result)):
+            print("Warning: Non-finite values in VC normalization (GPU)")
+        return result
 
     @cuda.jit
     def _ice_normalization_kernel(matrix, bias, max_iter, tolerance):
