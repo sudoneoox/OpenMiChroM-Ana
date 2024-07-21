@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
-from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
+from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
 import os
 
 class PlotHelper:
@@ -49,7 +49,7 @@ class PlotHelper:
         }
         
         self.cacheStorage = os.path.join(os.getcwd(), cacheStorage)
-        self.compute_helpers = ComputeHelpers()
+        self.compute_helpers = ComputeHelpersCPU()
         self.compute_helpers.setMem(path=self.cacheStorage)
         
         if AnalysisStorage == '':

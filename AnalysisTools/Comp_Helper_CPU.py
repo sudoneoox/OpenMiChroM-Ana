@@ -9,6 +9,7 @@ from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap.umap_ as umap
 from numba import jit
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import os
 
@@ -93,13 +94,13 @@ def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
     
     return matrix_balanced
 
-class ComputeHelpers:
+class ComputeHelpersCPU:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis.
     This version supports multithreading for improved performance on CPU.
     """
 
-    def __init__(self, memory_location: str = '.', memory_verbosity: int = 0):
+    def __init__(self, memory_location: str = '.', memory_verbosity: int = 0, n_jobs=None):
         """
         Initialize the ComputeHelpers class.
 
@@ -108,7 +109,7 @@ class ComputeHelpers:
             memory_verbosity (int): The verbosity level for memory caching.
         """
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
-        self.n_jobs = os.cpu_count()  # Default to using all available cores
+        self.n_jobs = n_jobs if n_jobs is not None else self.set_n_jobs(-1)
         
         self.reduction_methods = {
             'pca': self._pca_reduction,
@@ -148,7 +149,7 @@ class ComputeHelpers:
         Args:
             n_jobs (int): Number of jobs to run in parallel. -1 means using all processors.
         """
-        self.n_jobs = n_jobs if n_jobs > 0 else os.cpu_count()
+        self.n_jobs = n_jobs if n_jobs > 0 else multiprocessing.cpu_count()
 
     '''#!========================================================== DATA LOADING AND PREPROCESSING ====================================================================================='''
 
@@ -361,7 +362,7 @@ class ComputeHelpers:
         Returns:
             np.array: Normalized matrix.
         """
-        return self.save_divide(m, m.sum(axis=1, keepdims=True))
+        return self.safe_divide(m, m.sum(axis=1, keepdims=True))
 
 
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
@@ -409,9 +410,11 @@ class ComputeHelpers:
         """
         try:
             with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                return executor.submit(self.reduction_methods[method], X, n_components, self.n_jobs).result()
+                return executor.submit(self.reduction_methods[method], X, n_components).result()
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
+        
+    
 
     def _pca_reduction(self, X, n_components):
         """
@@ -703,6 +706,6 @@ class ComputeHelpers:
         """Set memory location and verbosity."""
         self.memory = Memory(location=path, verbose=verbose)
     
-    def save_divide(self, a, b):
+    def safe_divide(self, a, b):
         """Safely divide two ararays, returning 0 where division by zero would occur"""
         return np.divide(a, b, out=np.zeros_like(a), where=b!=0)

@@ -1,5 +1,7 @@
 from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
+from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
+
 
 from sklearn.cluster import SpectralClustering
 from sklearn.decomposition import PCA
@@ -20,7 +22,14 @@ import os
 
 
 class Ana:
-    def __init__(self, analysisStoragePath: str = "", execution_mode: str = 'cpu', showPlots=True, cacheStoragePath: str=""):
+    def __init__(
+        self,  
+        execution_mode: str = 'cpu', 
+        analysisStoragePath: str = "",
+        cacheStoragePath: str="",
+        showPlots=True, 
+        **kwargs
+        ):
         """__init__
 
         Initializes the Ana class with a base folder for data storage.
@@ -48,27 +57,34 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
-        
-        self.execution_mode = execution_mode
-        if execution_mode.lower() == "cuda":
-            # from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
-            # self.compute_helpers = ComputeHelpersGPU()
-            pass
-        elif execution_mode.lower() == "cpu":
-            from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
-            self.compute_helpers = ComputeHelpers()
+        if isinstance(execution_mode, dict):
+            mode = execution_mode.get("mode", "cpu")
+            params = execution_mode.get("execParams", {})
+        elif isinstance(execution_mode, ComputeHelpersCPU):
+            mode = "custom"
+            self.compute_helpers = execution_mode
         else:
-            print("Execution mode not valid. Options are cpu/cuda")
-            exit()
+            mode = execution_mode
+            params = kwargs
+            
+        if mode.lower() == "gpu":
+            pass
+            from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
+            self.compute_helpers = ComputeHelpersGPU(**params)
+        elif mode.lower() == "cpu":
+            self.compute_helpers = ComputeHelpersCPU(**params)
+        elif mode!= "custom":
+            raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
+        
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
+            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
             
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
+            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
             
             
@@ -220,11 +236,11 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if n_components == -1:
             n_components = self.compute_helpers.find_optimal_clusters(X, 15)
-        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode)
+        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components)
         if self.showPlots:
             self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}_{method}_{metric}.png'),
-                'title': 'PCA Plot',
+                'title': f"{args}",
                 'n_components': n_components
             })
         return pca_result, explained_variance_ratio, components

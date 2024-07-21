@@ -31,11 +31,11 @@ Note: GPU support requires a CUDA-enabled GPU and appropriate CUDA toolkit insta
 """
 
 
-from .Comp_Helper_CPU import ComputeHelpers
+from .Comp_Helper_CPU import ComputeHelpersCPU
 # from .Comp_Helper_GPU import ComputeHelpersGPU
 
 from .Plot_Helper import PlotHelper
 from .Ana import Ana 
 
 
-__all__ = ['Ana', 'ComputeHelpers', 'ComputeHelpersGPU', 'Plot_Helper']
+__all__ = ['Ana', 'ComputeHelpersCPU', 'ComputeHelpersGPU', 'PlotHelper']
