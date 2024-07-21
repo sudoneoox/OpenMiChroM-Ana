@@ -38,6 +38,7 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
             if row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
+                print(f"division of zero setting {matrix_balanced[i, j]} to one")
                 bias[i] = 1
         
         for i in range(n):
@@ -45,6 +46,7 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
                 if bias[i] != 0 and bias[j] != 0:
                     matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
                 else:
+                    print(f"division of zero setting {matrix_balanced[i, j]} to zero")
                     matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
@@ -655,7 +657,7 @@ class ComputeHelpers:
         """
         return Parallel(n_jobs=self.n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
 
-    def cached_calc_dist(self, trajectories, metric, n_jobs):
+    def cached_calc_dist(self, trajectories, metric):
         """
         Caches the calculation of distance matrices.
 
@@ -667,7 +669,7 @@ class ComputeHelpers:
         Returns:
             list: List of cached distance matrices.
         """
-        return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric, n_jobs)
+        return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric, self.n_jobs)
 
     def getNormMethods(self):
         """Get the list of available normalization methods."""

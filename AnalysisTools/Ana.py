@@ -220,7 +220,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if n_components == -1:
             n_components = self.compute_helpers.find_optimal_clusters(X, 15)
-        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode, n_jobs=-1)
+        pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components, self.execution_mode)
         if self.showPlots:
             self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'pca_plot_{args}_{method}_{metric}.png'),
@@ -327,7 +327,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if n_components == -1:
             n_components == self.compute_helpers.find_optimal_clusters(X)
-        svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components, self.execution_mode, n_jobs=-1)
+        svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components, self.execution_mode)
         if self.showPlots:
             self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'svd_plot_{args}_{method}_{metric}.png'),
@@ -520,7 +520,7 @@ class Ana:
 
     """=========================================UTILITIES========================================"""
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', n_jobs: int = -1, norm: str = 'ice') -> tuple:
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         try:
@@ -540,7 +540,7 @@ class Ana:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
-            dist = self.compute_helpers.cached_calc_dist(trajectories, metric, n_jobs)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric)
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
             
