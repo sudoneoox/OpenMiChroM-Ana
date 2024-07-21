@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.preprocessing import normalize
 from scipy.spatial.distance import pdist, squareform
 from joblib import Parallel, delayed, Memory
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score, silhouette_samples
+from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
 from kneed import KneeLocator
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
@@ -35,14 +35,17 @@ def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
         col_sums = matrix_balanced.sum(axis=0)
         
         for i in range(n):
-            if bias[i] != 0:
+            if row_sums[i] != 0 and col_sums[i] != 0:
                 bias[i] *= np.sqrt(row_sums[i] * col_sums[i])
             else:
                 bias[i] = 1
         
         for i in range(n):
             for j in range(n):
-                matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix_balanced[i, j] = matrix[i, j] / (bias[i] * bias[j])
+                else:
+                    matrix_balanced[i, j] = 0
         
         if np.sum(np.abs(bias - bias_old)) < tolerance:
             break
@@ -381,7 +384,7 @@ class ComputeHelpers:
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
-    def run_reduction(self, method, X, n_components, n_jobs=-1):
+    def run_reduction(self, method, X, n_components):
         """
         Run the specified dimensionality reduction method.
 
@@ -395,12 +398,12 @@ class ComputeHelpers:
             tuple: Reduced data and additional information (if available).
         """
         try:
-            with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else self.n_jobs) as executor:
-                return executor.submit(self.reduction_methods[method], X, n_components, n_jobs).result()
+            with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                return executor.submit(self.reduction_methods[method], X, n_components, self.n_jobs).result()
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
 
-    def _pca_reduction(self, X, n_components, n_jobs):
+    def _pca_reduction(self, X, n_components):
         """
         Perform PCA reduction.
 
@@ -416,7 +419,7 @@ class ComputeHelpers:
         result = pca.fit_transform(X)
         return result, pca.explained_variance_ratio_, pca.components_
 
-    def _svd_reduction(self, X, n_components, n_jobs):
+    def _svd_reduction(self, X, n_components):
         """
         Perform SVD reduction.
 
@@ -432,7 +435,7 @@ class ComputeHelpers:
         result = svd.fit_transform(X)
         return result
 
-    def _tsne_reduction(self, X, n_components, n_jobs):
+    def _tsne_reduction(self, X, n_components):
             """
             Perform t-SNE reduction.
 
@@ -444,11 +447,11 @@ class ComputeHelpers:
             Returns:
                 tuple: t-SNE result, KL divergence, and None (for consistency with other methods).
             """
-            tsne = TSNE(n_components=n_components, n_jobs=n_jobs)
+            tsne = TSNE(n_components=n_components, n_jobs=self.n_jobs)
             result = tsne.fit_transform(X)
             return result, tsne.kl_divergence_, None
 
-    def _umap_reduction(self, X, n_components, n_jobs):
+    def _umap_reduction(self, X, n_components):
         """
         Perform UMAP reduction.
 
@@ -460,11 +463,11 @@ class ComputeHelpers:
         Returns:
             tuple: UMAP result, embedding, and graph.
         """
-        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=n_jobs)
+        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=self.n_jobs)
         result = umap_reducer.fit_transform(X)
         return result, umap_reducer.embedding_, umap_reducer.graph_
 
-    def _mds_reduction(self, X, n_components, n_jobs):
+    def _mds_reduction(self, X, n_components):
         """
         Perform MDS reduction.
 
@@ -476,13 +479,13 @@ class ComputeHelpers:
         Returns:
             tuple: MDS result, stress, and dissimilarity matrix.
         """
-        mds = MDS(n_components=n_components, n_jobs=n_jobs)
+        mds = MDS(n_components=n_components, n_jobs=self.n_jobs)
         result = mds.fit_transform(X)
         return result, mds.stress_, mds.dissimilarity_matrix_
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, n_jobs=-1, **kwargs):
+    def run_clustering(self, method, X, **kwargs):
         """
         Run the specified clustering method.
 
@@ -496,12 +499,12 @@ class ComputeHelpers:
             np.array: Cluster labels.
         """
         try:
-            with ThreadPoolExecutor(max_workers=n_jobs if n_jobs > 0 else self.n_jobs) as executor:
-                return executor.submit(self.clustering_methods[method], X, n_jobs=n_jobs, **kwargs).result()
+            with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                return executor.submit(self.clustering_methods[method], X, n_jobs=self.n_jobs, **kwargs).result()
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
 
-    def _kmeans_clustering(self, X: np.array, n_clusters: int, n_jobs: int, **kwargs):
+    def _kmeans_clustering(self, X: np.array, n_clusters: int, **kwargs):
         """
         Perform K-means clustering.
 
@@ -514,9 +517,9 @@ class ComputeHelpers:
         Returns:
             np.array: Cluster labels.
         """
-        return KMeans(n_clusters=n_clusters, n_jobs=n_jobs, **kwargs).fit_predict(X)
+        return KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
 
-    def _spectral_clustering(self, X, n_clusters, n_jobs, **kwargs):
+    def _spectral_clustering(self, X, n_clusters, **kwargs):
         """
         Perform Spectral clustering.
 
@@ -530,9 +533,9 @@ class ComputeHelpers:
             np.array: Cluster labels.
         """
         from sklearn.cluster import SpectralClustering
-        return SpectralClustering(n_clusters=n_clusters, n_jobs=n_jobs, **kwargs).fit_predict(X)
+        return SpectralClustering(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
 
-    def _hierarchical_clustering(self, X, n_clusters, n_jobs, **kwargs):
+    def _hierarchical_clustering(self, X, n_clusters, **kwargs):
         """
         Perform Hierarchical clustering.
 
@@ -549,7 +552,7 @@ class ComputeHelpers:
         Z = linkage(X, method=kwargs.get('method', 'ward'), metric=kwargs.get('metric', 'euclidean'))
         return fcluster(Z, t=n_clusters, criterion='maxclust')
 
-    def _dbscan_clustering(self, X, eps, min_samples, n_jobs, **kwargs):
+    def _dbscan_clustering(self, X, eps, min_samples, **kwargs):
         """
         Perform DBSCAN clustering.
 
@@ -564,9 +567,9 @@ class ComputeHelpers:
             np.array: Cluster labels.
         """
         from sklearn.cluster import DBSCAN
-        return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=n_jobs, **kwargs).fit_predict(X)
+        return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
 
-    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, n_jobs, **kwargs):
+    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, **kwargs):
         """
         Perform OPTICS clustering.
 
@@ -582,7 +585,7 @@ class ComputeHelpers:
             np.array: Cluster labels.
         """
         from sklearn.cluster import OPTICS
-        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=n_jobs, **kwargs).fit_predict(X)
+        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
 
     def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
         """
@@ -638,7 +641,7 @@ class ComputeHelpers:
 
     """==================================================================== UTILITY METHODS =========================================================="""
 
-    def _calc_dist_wrapper(self, trajectories, metric, n_jobs):
+    def _calc_dist_wrapper(self, trajectories, metric):
         """
         Wrapper function for calc_dist to be used with joblib caching.
 
@@ -650,7 +653,7 @@ class ComputeHelpers:
         Returns:
             list: List of distance matrices.
         """
-        return Parallel(n_jobs=n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
+        return Parallel(n_jobs=self.n_jobs)(delayed(self.calc_dist)(val, metric) for val in trajectories)
 
     def cached_calc_dist(self, trajectories, metric, n_jobs):
         """

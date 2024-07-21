@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
-from AnalysisTools.compute_helpers import ComputeHelpers
+from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
 import os
 
 class PlotHelper:

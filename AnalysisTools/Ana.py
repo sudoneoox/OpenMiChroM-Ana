@@ -36,10 +36,6 @@ class Ana:
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
         self.showPlots = showPlots
-        
-      
-    
-        
         if self.showPlots:
             self.plot_helper = PlotHelper()
         else:
@@ -52,6 +48,18 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
+        
+        self.execution_mode = execution_mode
+        if execution_mode.lower() == "cuda":
+            # from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
+            # self.compute_helpers = ComputeHelpersGPU()
+            pass
+        elif execution_mode.lower() == "cpu":
+            from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
+            self.compute_helpers = ComputeHelpers()
+        else:
+            print("Execution mode not valid. Options are cpu/cuda")
+            exit()
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
@@ -62,18 +70,8 @@ class Ana:
             os.makedirs(self.cache_path, exist_ok=True)
             self.compute_helpers = ComputeHelpers(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
-        
-        self.execution_mode = execution_mode
-        if execution_mode.lower() == "cuda":
-            from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
-            self.compute_helpers = ComputeHelpersGPU()
-        elif execution_mode.lower() == "cpu":
-            from AnalysisTools.Comp_Helper_CPU import ComputeHelpers
-            self.compute_helpers = ComputeHelpers()
-        else:
-            print("Execution mode not valid. Options are cpu/cuda")
-            exit()
-
+            
+            
     def add_dataset(self, label: str, folder: str):
         """add_dataset
         
@@ -248,7 +246,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        tsne_result, kl_divergence, _ = self.compute_helpers.run_reduction('tsne', X, n_components=2, execution_mode=self.execution_mode, **tsneParams or {})
+        tsne_result, kl_divergence, _ = self.compute_helpers.run_reduction('tsne', X, n_components=2,  **tsneParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'tsne_plot_{args}_{method}.png'),
@@ -273,7 +271,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        umap_result = self.compute_helpers.run_reduction('umap', X, n_components=2, execution_mode=self.execution_mode, **umapParams or {})
+        umap_result = self.compute_helpers.run_reduction('umap', X, n_components=2,  **umapParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="umapplot", data=umap_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'umap_plot_{args}_{method}.png'),
@@ -302,7 +300,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2, execution_mode=self.execution_mode, **ivisParams or {})
+        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2,  **ivisParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="ivisplot", data=ivis_result, plot_params={
                 'outputFileName': os.path.join(self.outPath, f'ivis_plot_{args}_{method}.png'),
@@ -387,7 +385,7 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        spectral_result = self.compute_helpers.run_clustering('spectral', X, execution_mode=self.execution_mode, n_clusters=num_clusters, **spectralParams or {})
+        spectral_result = self.compute_helpers.run_clustering('spectral', X,  n_clusters=num_clusters, **spectralParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, spectral_result], plot_params={
                 'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
@@ -416,7 +414,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        kmeans_result = self.compute_helpers.run_clustering('kmeans', X, execution_mode=self.execution_mode, n_clusters=n_clusters, **kwargs)
+        kmeans_result = self.compute_helpers.run_clustering('kmeans', X,  n_clusters=n_clusters, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="kmeans", data=[X, kmeans_result[0]], plot_params={
@@ -447,7 +445,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        dbscan_result = self.compute_helpers.run_clustering('dbscan', X, execution_mode=self.execution_mode, eps=eps, min_samples=min_samples, **kwargs)
+        dbscan_result = self.compute_helpers.run_clustering('dbscan', X,  eps=eps, min_samples=min_samples, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="dbscan", data=[X, dbscan_result], plot_params={
@@ -477,7 +475,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X, execution_mode=self.execution_mode, n_clusters=n_clusters, linkage_method=method, **kwargs)
+        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X,  n_clusters=n_clusters, linkage_method=method, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="hierarchical", data=[X, hierarchical_result], plot_params={
@@ -509,7 +507,7 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        optics_result = self.compute_helpers.run_clustering('optics', X, execution_mode=self.execution_mode, min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
+        optics_result = self.compute_helpers.run_clustering('optics', X,  min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="optics", data=[X, optics_result], plot_params={
@@ -542,7 +540,7 @@ class Ana:
                 print(f"Trajectories not yet loaded for {label}. Load them first")
                 return np.array([]), np.array([])
             
-            dist = self.compute_helpers.cached_calc_dist(trajectories, metric, self.execution_mode, n_jobs)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric, n_jobs)
             dist = np.array(dist)
             print(f"{label} has dist shape {dist.shape}")
             

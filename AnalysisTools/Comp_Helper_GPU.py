@@ -213,11 +213,14 @@ class ComputeHelpersGPU:
                 old_bias = bias[i]
                 row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
                 col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
-                if bias[i] != 0:
+                if row_sum != 0 and col_sum != 0:
                     bias[i] *= cp.sqrt(row_sum * col_sum)
                 else:
                     bias[i] = 1
-                matrix[i, j] /= (bias[i] * bias[j])
+                if bias[i] != 0 and bias[j] != 0:
+                    matrix[i, j] /= (bias[i] * bias[j])
+                else:
+                    matrix[i, j] = 0
                 if abs(bias[i] - old_bias) < tolerance:
                     break
 
