@@ -2,7 +2,7 @@ import numpy as np
 import cupy as cp
 from numba import cuda
 from sklearn.base import BaseEstimator, TransformerMixin
-from cupyx.scipy.spatial.distance import pdist, squareform
+from cupyx.scipy.spatial.distance import pdist
 from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN
 from cuml.metrics import silhouette_score, silhouette_samples
 from cuml.cluster import SpectralClustering
@@ -472,3 +472,11 @@ class ComputeHelpersGPU:
         pinned_mempool = cp.get_default_pinned_memory_pool()
         mempool.free_all_blocks()
         pinned_mempool.free_all_blocks()
+        
+    """================================================== OTHER UTILS ==================================================================="""
+    def squareform(distances):
+        n = int(np.sqrt(len(distances) * 2)) + 1
+        dist_matrix = cp.zeros((n, n))
+        dist_matrix[cp.triu_indices(n, k=1)] = distances
+        dist_matrix = dist_matrix + dist_matrix.T
+        return dist_matrix

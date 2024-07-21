@@ -1,14 +1,6 @@
-test/data/*
 test/cache/*
 test/joblib/*
-test/data/*/iteration_*/*.pdb
-test/data/*/iteration_*/*.gro
-test/data/*/iteration_*/*.ndb
-test/data/*/iteration_*/Nframes*
-test/data/*/iteration_*/*.pdb
-test/data/*/iteration_*/log
-test/data/*/iteration_*/*h5
-test/data/*/iteration_*/*.dat
+test/data/*
 test/Analysis/*
 AnalysisTools/__pycache__/
 TODO

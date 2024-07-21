@@ -16,7 +16,7 @@ OpenMiChroM-Ana is a Python package for analyzing chromosome structure data. It 
 ## Installation
 
 ### Prerequisites
-- Python 3.12
+- Python 3.10
 - For GPU support: CUDA toolkit 11.8 or higher
 
 
@@ -35,7 +35,7 @@ The GPU version requires CUDA and the RAPIDS suite of libraries. Follow these st
 - create new conda or venv environment
 
 ```bash
-conda create -n [envName] python=3.12
+conda create -n [envName] python=3.10
 conda activate [envName]
 ```
 
