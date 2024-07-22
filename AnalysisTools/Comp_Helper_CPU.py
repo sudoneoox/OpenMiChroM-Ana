@@ -11,7 +11,6 @@ import umap.umap_ as umap
 from numba import jit
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
-import os
 
 @jit(nopython=True)
 def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
@@ -116,7 +115,8 @@ class ComputeHelpersCPU:
             'svd': self._svd_reduction,
             'tsne': self._tsne_reduction,
             'umap': self._umap_reduction,
-            'mds': self._mds_reduction
+            'mds': self._mds_reduction,
+            'ivis': self._ivis_reduction,
         }
         
         self.clustering_methods = {
@@ -403,7 +403,6 @@ class ComputeHelpersCPU:
             method (str): The reduction method to use.
             X (np.array): Input data.
             n_components (int): Number of components for the reduction.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: Reduced data and additional information (if available).
@@ -423,7 +422,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: PCA result, explained variance ratio, and components.
@@ -446,7 +444,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             np.array: SVD result.
@@ -464,7 +461,6 @@ class ComputeHelpersCPU:
             Args:
                 X (np.array): Input data.
                 n_components (int): Number of components.
-                n_jobs (int): Number of jobs to run in parallel.
 
             Returns:
                 tuple: t-SNE result, KL divergence, and None (for consistency with other methods).
@@ -480,7 +476,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: UMAP result, embedding, and graph.
@@ -496,7 +491,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: MDS result, stress, and dissimilarity matrix.
@@ -504,6 +498,20 @@ class ComputeHelpersCPU:
         mds = MDS(n_components=n_components, n_jobs=self.n_jobs)
         result = mds.fit_transform(X)
         return result, mds.stress_, mds.dissimilarity_matrix_
+    
+    def _ivis_reduction(self, X, n_components):
+        """_ivis_reduction _summary_
+
+        _extended_summary_
+
+        Arguments:
+            X (np.array): Input data.
+            n_components (int): number of components.
+            
+        Returns:
+            tuple: 
+        """
+        pass
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 

@@ -2,26 +2,14 @@ from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
 
-# NOTE
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
-from sklearn.feature_selection import VarianceThreshold
-from sklearn.covariance import EllipticEnvelope
-from sklearn.decomposition import KernelPCA
-
-from sklearn.cluster import SpectralClustering
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils import resample
-from sklearn.neighbors import NearestNeighbors
 
-from scipy.cluster.hierarchy import linkage, fcluster
+
+from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import cdist
-from scipy.sparse import csgraph
-from scipy.sparse.linalg import eigsh
 
 import numpy as np
-import umap
-import ivis
 import os 
 
 
@@ -412,7 +400,10 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2,  **ivisParams or {})
+        if n_clusters == -1:
+            n_clusters = self.compute_helpers.find_optimal_clusters(X, 15)
+            
+        ivis_result, _, __ = self.compute_helpers.run_reduction('ivis', X, n_components=n_components)
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="ivisplot", data=ivis_result, plot_params={
@@ -689,7 +680,7 @@ class Ana:
 
 
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False, expiremental: bool = True) -> tuple:
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
         """
         Calculate and cache the distance matrix and linkage matrix for given datasets.
 
@@ -771,10 +762,6 @@ class Ana:
         if np.any(non_finite_mask):
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
-        
-        if expiremental:
-            scaler = StandardScaler()
-            X = scaler.fit_transform(X)
             
         # Perform linkage
         try:
