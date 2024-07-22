@@ -321,7 +321,7 @@ class Ana:
         
         if self.showPlots:
             plot_param = {
-                'outputFileName': f'{tsnePath}/tsne_plot_{args}_{method}_{metric}.png',
+                'outputFileName': f'{tsnePath}/tsne_plot_{args}_{method}_{metric}_{norm}.png',
                 'cmap': 'viridis',
                 'plot_type': 'tsneplot',
                 'title': f't-SNE of {args}',
@@ -373,7 +373,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params={
-                'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}_{norm}.png'),
                 'plot_type': 'umapplot',
                 'cmap': 'viridis',
                 'embedding': embedding,
@@ -510,7 +510,7 @@ class Ana:
         print(f"n_components to reach 95% variance ratio {n_components_95}")
         if self.showPlots:
             plot_param = {
-                'outputFileName': f'{mdsPath}/mds_plot_{args}_{method}_{metric}.png',
+                'outputFileName': f'{mdsPath}/mds_plot_{args}_{method}_{metric}_{norm}.png',
                 'cmap': 'viridis',
                 'plot_type': 'mdsplot',
                 'title': f'MDS of {args}',
@@ -550,7 +550,7 @@ class Ana:
         spectral_result = self.compute_helpers.run_clustering('spectral', X,  n_clusters=num_clusters, **spectralParams or {})
         if self.showPlots:
             self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, spectral_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'cmap':'viridis',
                 'title': f'{args}',
             })
@@ -581,7 +581,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="kmeans", data=[X, kmeans_result[0]], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'kmeans_clustering_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'kmeans_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'cmap':'viridis',
                 'title': f'{args}',
             })
@@ -613,7 +613,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="dbscan", data=[X, dbscan_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'dbscan_clustering_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'dbscan_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'cmap':'viridis',
                 'title': f'{args}',
             })
@@ -644,7 +644,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="hierarchical", data=[X, hierarchical_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'cmap':'viridis',
                 'title': f'{args}',
             })
@@ -677,7 +677,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="optics", data=[X, optics_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'optics_clustering_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'optics_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'cmap':'viridis',
                 'title': f'{args}',
             })
