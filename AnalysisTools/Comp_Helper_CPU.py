@@ -9,6 +9,7 @@ from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap.umap_ as umap
 from numba import jit
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import os
 
@@ -93,13 +94,13 @@ def _kr_norm_numba(matrix, max_iter=100, tolerance=1e-5):
     
     return matrix_balanced
 
-class ComputeHelpers:
+class ComputeHelpersCPU:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis.
     This version supports multithreading for improved performance on CPU.
     """
 
-    def __init__(self, memory_location: str = '.', memory_verbosity: int = 0):
+    def __init__(self, memory_location: str = '.', memory_verbosity: int = 0, n_jobs=None):
         """
         Initialize the ComputeHelpers class.
 
@@ -108,7 +109,7 @@ class ComputeHelpers:
             memory_verbosity (int): The verbosity level for memory caching.
         """
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
-        self.n_jobs = os.cpu_count()  # Default to using all available cores
+        self.n_jobs = n_jobs if n_jobs is not None else self.set_n_jobs(multiprocessing.cpu_count())
         
         self.reduction_methods = {
             'pca': self._pca_reduction,
@@ -148,7 +149,7 @@ class ComputeHelpers:
         Args:
             n_jobs (int): Number of jobs to run in parallel. -1 means using all processors.
         """
-        self.n_jobs = n_jobs if n_jobs > 0 else os.cpu_count()
+        self.n_jobs = n_jobs if n_jobs > 0 else multiprocessing.cpu_count()
 
     '''#!========================================================== DATA LOADING AND PREPROCESSING ====================================================================================='''
 
@@ -361,7 +362,7 @@ class ComputeHelpers:
         Returns:
             np.array: Normalized matrix.
         """
-        return self.save_divide(m, m.sum(axis=1, keepdims=True))
+        return self.safe_divide(m, m.sum(axis=1, keepdims=True))
 
 
     def ice_normalization(self, matrix: np.array, max_iter: int=100, tolerance: float=1e-5) -> np.array:
@@ -409,9 +410,11 @@ class ComputeHelpers:
         """
         try:
             with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                return executor.submit(self.reduction_methods[method], X, n_components, self.n_jobs).result()
+                return executor.submit(self.reduction_methods[method], X, n_components).result()
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
+        
+    
 
     def _pca_reduction(self, X, n_components):
         """
@@ -427,7 +430,14 @@ class ComputeHelpers:
         """
         pca = PCA(n_components=n_components)
         result = pca.fit_transform(X)
+        feature_importance = abs(pca.components_[0])
+        sorted_idx = np.argsort(feature_importance)
+        print("Feature Importance: ")
+        for idx in sorted_idx[-10:]: # print top 10 features
+            print(f"Feature {idx}: {feature_importance[idx]:.4f}")
         return result, pca.explained_variance_ratio_, pca.components_
+        
+
 
     def _svd_reduction(self, X, n_components):
         """
@@ -443,7 +453,9 @@ class ComputeHelpers:
         """
         svd = TruncatedSVD(n_components=n_components)
         result = svd.fit_transform(X)
-        return result
+        singular_values = svd.singular_values_
+        vt = svd.components_
+        return result, singular_values, vt
 
     def _tsne_reduction(self, X, n_components):
             """
@@ -473,7 +485,7 @@ class ComputeHelpers:
         Returns:
             tuple: UMAP result, embedding, and graph.
         """
-        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=self.n_jobs)
+        umap_reducer = umap.UMAP(n_components=n_components)
         result = umap_reducer.fit_transform(X)
         return result, umap_reducer.embedding_, umap_reducer.graph_
 
@@ -627,27 +639,26 @@ class ComputeHelpers:
         # Return the smaller of the two to be conservative
         return min(elbow, silhouette_optimal)
 
-    def evaluate_clustering(self, data, labels):
+    def evaluate_clustering(self, data, n_clusters=5):
         """
-        Evaluate clustering quality using various metrics.
+        Evaluate clustering quality using various metrics on GPU.
 
         Args:
-            data (np.array): Input data used for clustering.
-            labels (np.array): Cluster labels assigned to the data points.
+            data (cp.array): Input data used for clustering.
+            labels (cp.array): Cluster labels assigned to the data points.
 
         Returns:
-            tuple: Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index.
+            cluster_labels, array: [Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index].
         """
-        silhouette = silhouette_score(data, labels)
-        calinski_harabasz = calinski_harabasz_score(data, labels)
-        davies_bouldin = davies_bouldin_score(data, labels)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        cluster_labels = kmeans.fit_predict(data)
         
-        print("\nClustering Evaluation Metrics:")
-        print(f"  Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
-        print(f"  Calinski-Harabasz Index: {calinski_harabasz:.4f} (higher is better)")
-        print(f"  Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
-        
-        return silhouette, calinski_harabasz, davies_bouldin
+        silhouette = silhouette_score(data, cluster_labels)
+        calinski_harabasz = calinski_harabasz_score(data, cluster_labels)
+        davies_bouldin = davies_bouldin_score(data, cluster_labels)
+
+        score_list = [silhouette, calinski_harabasz, davies_bouldin]
+        return cluster_labels, score_list
 
     """==================================================================== UTILITY METHODS =========================================================="""
 
@@ -703,6 +714,6 @@ class ComputeHelpers:
         """Set memory location and verbosity."""
         self.memory = Memory(location=path, verbose=verbose)
     
-    def save_divide(self, a, b):
+    def safe_divide(self, a, b):
         """Safely divide two ararays, returning 0 where division by zero would occur"""
         return np.divide(a, b, out=np.zeros_like(a), where=b!=0)
