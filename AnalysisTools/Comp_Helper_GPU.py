@@ -392,7 +392,7 @@ class ComputeHelpersGPU:
         # Return the smaller of the two to be conservative
         return min(elbow, silhouette_optimal)
 
-    def evaluate_clustering(self, data, labels):
+    def evaluate_clustering(self, data, n_clusters=5):
         """
         Evaluate clustering quality using various metrics on GPU.
 
@@ -403,20 +403,18 @@ class ComputeHelpersGPU:
         Returns:
             tuple: Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index.
         """
-        silhouette = silhouette_score(data, labels)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        cluster_labels = kmeans.fit_predict(data)
         
-        # Note: cuML doesn't provide Calinski-Harabasz and Davies-Bouldin indices
-        # We'll use placeholder values and print a warning
-        calinski_harabasz = None
-        davies_bouldin = None
-        
+        silhouette = silhouette_score(data, cluster_labels)
+        calinski_harabasz = calinski_harabasz_score(data, cluster_labels)
+        davies_bouldin = davies_bouldin_score(data, cluster_labels)
         print("\nClustering Evaluation Metrics:")
-        print(f"  Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
-        print("  Calinski-Harabasz Index: Not available in GPU implementation")
-        print("  Davies-Bouldin Index: Not available in GPU implementation")
+        print(f" Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
+        print(f" Calinski-Harabasz Index: {calinski_harabasz:.4f} (higher is better)")
+        print(f" Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
         
-        return silhouette, calinski_harabasz, davies_bouldin
-
+        return cluster_labels
     """==================================================================== UTILITY METHODS =========================================================="""
 
     def _calc_dist_wrapper(self, trajectories, metric):

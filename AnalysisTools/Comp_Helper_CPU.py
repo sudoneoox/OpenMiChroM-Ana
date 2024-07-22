@@ -109,7 +109,7 @@ class ComputeHelpersCPU:
             memory_verbosity (int): The verbosity level for memory caching.
         """
         self.memory = Memory(location=memory_location, verbose=memory_verbosity)
-        self.n_jobs = n_jobs if n_jobs is not None else self.set_n_jobs(-1)
+        self.n_jobs = n_jobs if n_jobs is not None else self.set_n_jobs(multiprocessing.cpu_count())
         
         self.reduction_methods = {
             'pca': self._pca_reduction,
@@ -430,7 +430,14 @@ class ComputeHelpersCPU:
         """
         pca = PCA(n_components=n_components)
         result = pca.fit_transform(X)
+        feature_importance = abs(pca.components_[0])
+        sorted_idx = np.argsort(feature_importance)
+        print("Feature Importance: ")
+        for idx in sorted_idx[-10:]: # print top 10 features
+            print(f"Feature {idx}: {feature_importance[idx]:.4f}")
         return result, pca.explained_variance_ratio_, pca.components_
+        
+
 
     def _svd_reduction(self, X, n_components):
         """
@@ -446,7 +453,9 @@ class ComputeHelpersCPU:
         """
         svd = TruncatedSVD(n_components=n_components)
         result = svd.fit_transform(X)
-        return result
+        singular_values = svd.singular_values_
+        vt = svd.components_
+        return result, singular_values, vt
 
     def _tsne_reduction(self, X, n_components):
             """
@@ -476,7 +485,7 @@ class ComputeHelpersCPU:
         Returns:
             tuple: UMAP result, embedding, and graph.
         """
-        umap_reducer = umap.UMAP(n_components=n_components, n_jobs=self.n_jobs)
+        umap_reducer = umap.UMAP(n_components=n_components)
         result = umap_reducer.fit_transform(X)
         return result, umap_reducer.embedding_, umap_reducer.graph_
 
@@ -630,27 +639,26 @@ class ComputeHelpersCPU:
         # Return the smaller of the two to be conservative
         return min(elbow, silhouette_optimal)
 
-    def evaluate_clustering(self, data, labels):
+    def evaluate_clustering(self, data, n_clusters=5):
         """
-        Evaluate clustering quality using various metrics.
+        Evaluate clustering quality using various metrics on GPU.
 
         Args:
-            data (np.array): Input data used for clustering.
-            labels (np.array): Cluster labels assigned to the data points.
+            data (cp.array): Input data used for clustering.
+            labels (cp.array): Cluster labels assigned to the data points.
 
         Returns:
-            tuple: Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index.
+            cluster_labels, array: [Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index].
         """
-        silhouette = silhouette_score(data, labels)
-        calinski_harabasz = calinski_harabasz_score(data, labels)
-        davies_bouldin = davies_bouldin_score(data, labels)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+        cluster_labels = kmeans.fit_predict(data)
         
-        print("\nClustering Evaluation Metrics:")
-        print(f"  Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
-        print(f"  Calinski-Harabasz Index: {calinski_harabasz:.4f} (higher is better)")
-        print(f"  Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
-        
-        return silhouette, calinski_harabasz, davies_bouldin
+        silhouette = silhouette_score(data, cluster_labels)
+        calinski_harabasz = calinski_harabasz_score(data, cluster_labels)
+        davies_bouldin = davies_bouldin_score(data, cluster_labels)
+
+        score_list = [silhouette, calinski_harabasz, davies_bouldin]
+        return cluster_labels, score_list
 
     """==================================================================== UTILITY METHODS =========================================================="""
 
