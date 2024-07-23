@@ -116,7 +116,6 @@ class ComputeHelpersCPU:
             'tsne': self._tsne_reduction,
             'umap': self._umap_reduction,
             'mds': self._mds_reduction,
-            'ivis': self._ivis_reduction,
         }
         
         self.clustering_methods = {
@@ -499,60 +498,7 @@ class ComputeHelpersCPU:
         result = mds.fit_transform(X)
         return result, mds.stress_, mds.dissimilarity_matrix_
     
-    def _ivis_reduction(self, X, n_components, **kwargs):
-        """
-        Perform Ivis reduction with dynamic parameter selection based on dataset size.
-
-        Args:
-            X (np.array): Input data.
-            n_components (int): Number of components.
-            kwargs: Additional keyword arguments for the Ivis model.
-
-        Returns:
-            tuple: Ivis result, Ivis projection, and None (for consistency with other methods).
-        """
-        from ivis import Ivis
-
-        # Determine dataset size
-        n_observations, n_features = X.shape
-
-        # Extract parameters from kwargs or set default values
-        k = kwargs.get('k', min(150, max(15, n_observations // 10)))
-        n_epochs_without_progress = kwargs.get('n_epochs_without_progress')
-        if n_epochs_without_progress is None:
-            if n_observations < 10000:
-                n_epochs_without_progress = 20
-            elif n_observations < 100000:
-                n_epochs_without_progress = 10
-            else:
-                n_epochs_without_progress = 5
-
-        model = kwargs.get('model', 'maaten' if n_observations < 500000 else 'szubert')
-        batch_size = kwargs.get('batch_size', min(128, n_observations))
-
-        # Adjust n_components if necessary
-        n_components = min(n_components, n_observations - 1, n_features)
-
-        try:
-            # Create Ivis model with dynamically selected parameters
-            ivis = Ivis(embedding_dims=n_components, 
-                        k=k, 
-                        model=model, 
-                        n_epochs_without_progress=n_epochs_without_progress,
-                        batch_size=batch_size)
-
-            # Fit and transform the data
-            result = ivis.fit_transform(X)
-            
-            # Get the Ivis projection
-            ivis_projection = ivis.transform(X)
-            
-            return result, ivis_projection, None
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to do ivis reduction: {e}")
-
-
+    
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
     def run_clustering(self, method, X, **kwargs):

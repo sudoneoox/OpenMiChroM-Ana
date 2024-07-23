@@ -21,7 +21,6 @@ seaborn = "^0.12.0"
 umap-learn = "^0.5.4"
 kneed = "^0.8.1"
 pandas = "^2.0.0"
-"ivis[cpu]" = "^2.0.9"
 
 [tool.poetry.group.gpu]
 optional = true

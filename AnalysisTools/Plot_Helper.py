@@ -252,8 +252,6 @@ class PlotHelper:
                 singular_values = embedding.flatten()[:5]  # Flatten to get a 1D array if embedding is 2D
                 singular_values_text = "UMAP Embedding: " + ", ".join([f"{val:.2f}" for val in singular_values])
                 plt.text(0.05, 0.95, singular_values_text, transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'ivisplot':
-            plt.text(0.05, 0.95, "IVIS projection", transform=ax.transAxes, verticalalignment='top')
         elif plot_type == 'svdplot':
             if isinstance(additional_info, np.ndarray):
                 singular_values_text = "Top singular values: " + ", ".join([f"{val:.2f}" for val in additional_info[:5]])
@@ -332,20 +330,6 @@ class PlotHelper:
             None
         """
         print("\nUMAP Plot:")
-        self._dimensionality_reduction_plot(data, params)
-
-    def _ivisplot(self, data, params):
-        """
-        Create an ivis plot.
-
-        Args:
-            data (list): [ivis_results, cluster_labels]
-            params (dict): Plotting parameters.
-
-        Returns:
-            None
-        """
-        print("\nivis Plot:")
         self._dimensionality_reduction_plot(data, params)
         
  

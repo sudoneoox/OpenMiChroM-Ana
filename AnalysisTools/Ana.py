@@ -379,58 +379,6 @@ class Ana:
             })
         return umap_result, embedding, graph
     
-    def ivis_reduction(self, *args: str, ivisParams: dict = None, sample_size: int = 5000, n_clusters: int = -1, method: str = 'weighted', metric: str="euclidean", norm: str = 'ice', n_components: int = 2, k: int = None, n_epochs_without_progress: int = None, model: str = None, batch_size: int = None) -> tuple:
-        """
-        Performs IVIS on the datasets and returns the IVIS results.
-
-        Args:
-            *args (str): The labels to create the IVIS from.
-            sample_size (int, optional): The sample size for IVIS. Default is 5000.
-            n_clusters (int, optional): Number of clusters for coloring. Default is 5.
-            method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
-            metric (str, optional): The distance metric to use. Default is 'euclidean'.
-            norm (str, optional): The normalization method to use. Default is 'ice'.
-            n_components (int, optional): Number of components for IVIS reduction. Default is 2.
-
-        Returns:
-            tuple: (np.array,) The IVIS results.
-        """
-        ivisPath = os.path.join(self.outPath, 'IVIS')
-        os.makedirs(ivisPath, exist_ok=True)
-
-        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-        if X.shape[0] > sample_size:
-            X = resample(X, n_samples=sample_size, random_state=42)
-
-        if n_clusters == -1:
-            n_clusters = self.compute_helpers.find_optimal_clusters(X, 15)
-            
-        n_components = min(n_components, X.shape[0] - 1)
-        ivis_result, ivis_projection, additional_info = self.compute_helpers.run_reduction(
-            'ivis', X, n_components=n_components, k=k, 
-            n_epochs_without_progress=n_epochs_without_progress, 
-            model=model, batch_size=batch_size
-        )
-        if self.showPlots:
-            self.plot_helper.plot(plot_type="ivisplot", data=(ivis_result, ivis_projection, None), plot_params={
-                'outputFileName': f'{ivisPath}/ivis_plot_{args}_{method}_{metric}_{norm}.png',
-                'plot_type': 'ivisplot',
-                'projection': ivis_projection,
-                'cmap': 'viridis',
-                'title': f'IVIS of {args}',
-                'x_label': 'IVIS 1',
-                'y_label': 'IVIS 2',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'sample_size': sample_size,
-                'n_clusters': n_clusters,
-                'size': 50,
-                'alpha': 0.7,
-                'n_components': n_components,
-            })
-
-        return ivis_result, ivis_projection, _
     
     def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 2) -> tuple:
         """

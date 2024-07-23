@@ -1,4 +1,3 @@
 cudf>=24.00
 cuml>=24.00
 cugraph>=24.00
-ivis[gpu]>=2.0.9 
