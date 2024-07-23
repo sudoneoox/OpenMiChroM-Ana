@@ -501,7 +501,7 @@ class ComputeHelpersCPU:
     
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, **kwargs):
+    def run_clustering(self, method, X, n_components, n_clusters, **kwargs):
         """
         Run the specified clustering method.
 
@@ -516,11 +516,11 @@ class ComputeHelpersCPU:
         """
         try:
             with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                return executor.submit(self.clustering_methods[method], X, n_jobs=self.n_jobs, **kwargs).result()
+                return executor.submit(self.clustering_methods[method], X, n_clusters=n_clusters, n_components=n_components, **kwargs).result()
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
 
-    def _kmeans_clustering(self, X: np.array, n_clusters: int, **kwargs):
+    def _kmeans_clustering(self, X: np.array, n_clusters: int, n_components: int, **kwargs):
         """
         Perform K-means clustering.
 
@@ -533,9 +533,15 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Cluster labels.
         """
-        return KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        kmeans = KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs)
+        labels = kmeans.fit_predict(X, n_clusters=n_clusters, n_components=n_components)
+        return labels, {
+            'inertia': kmeans.inertia_,
+            'cluster_centers': kmeans.cluster_centers_,
+            'n_iter': kmeans.n_iter_
+        }
 
-    def _spectral_clustering(self, X, n_clusters, **kwargs):
+    def _spectral_clustering(self, X: np.array, n_clusters: int, n_components: int, **kwargs):
         """
         Perform Spectral clustering.
 
@@ -546,10 +552,15 @@ class ComputeHelpersCPU:
             **kwargs: Additional arguments for SpectralClustering.
 
         Returns:
-            np.array: Cluster labels.
+            np.array: Cluster labels. dict: additional info.
         """
         from sklearn.cluster import SpectralClustering
-        return SpectralClustering(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        spectral = SpectralClustering(n_clusters=n_clusters,n_components=n_components, **kwargs)
+        labels = spectral.fit_predict(X)
+        return labels, {
+            'affinity_matrix_': spectral.affinity_matrix_,
+            'n_features_in': spectral.n_features_in_
+        }
 
     def _hierarchical_clustering(self, X, n_clusters, **kwargs):
         """
@@ -565,8 +576,12 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from scipy.cluster.hierarchy import linkage, fcluster
-        Z = linkage(X, method=kwargs.get('method', 'ward'), metric=kwargs.get('metric', 'euclidean'))
-        return fcluster(Z, t=n_clusters, criterion='maxclust')
+        linkage_matrix = linkage(X, method=kwargs.get('method', 'ward'))
+        labels = fcluster(linkage_matrix, t=n_clusters, criterion='maxclust')
+        return labels, {
+            'linkage_matrix': linkage_matrix
+        }
+
 
     def _dbscan_clustering(self, X, eps, min_samples, **kwargs):
         """
@@ -583,7 +598,13 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from sklearn.cluster import DBSCAN
-        return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        dbscan = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs)
+        labels = dbscan.fit_predict(X)
+        return labels, {
+            'core_sample_indices': dbscan.core_sample_indices_,
+            'components': dbscan.components_,
+            'n_features_in': dbscan.n_features_in_
+        }
 
     def _optics_clustering(self, X, min_samples, xi, min_cluster_size, **kwargs):
         """
@@ -601,37 +622,15 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from sklearn.cluster import OPTICS
-        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        optics = OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs)
+        labels = optics.fit_predict(X)
+        return labels, {
+            'reachability': optics.reachability_,
+            'ordering': optics.ordering_,
+            'core_distances': optics.core_distances_,
+            'predecessor': optics.predecessor_
+        }
 
-    def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
-        """
-        Find the optimal number of clusters using the elbow method and silhouette score.
-
-        Args:
-            data (np.array): Input data for clustering.
-            max_clusters (int): Maximum number of clusters to consider.
-
-        Returns:
-            int: Optimal number of clusters.
-        """
-        inertias = []
-        silhouette_scores = []
-        
-        for k in range(2, max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(data)
-            inertias.append(kmeans.inertia_)
-            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
-        
-        # Use the elbow method to find the optimal number of clusters
-        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
-        elbow = kl.elbow if kl.elbow else max_clusters
-        
-        # Find the number of clusters with the highest silhouette score
-        silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
-        
-        # Return the smaller of the two to be conservative
-        return min(elbow, silhouette_optimal)
 
     def evaluate_clustering(self, data, n_clusters=5):
         """
@@ -683,6 +682,38 @@ class ComputeHelpersCPU:
             list: List of cached distance matrices.
         """
         return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric)
+    
+    def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
+        """
+        Find the optimal number of clusters using the elbow method and silhouette score.
+
+        Args:
+            data (np.array): Input data for clustering.
+            max_clusters (int): Maximum number of clusters to consider.
+
+        Returns:
+            int: Optimal number of clusters.
+        """
+        inertias = []
+        silhouette_scores = []
+        
+        for k in range(2, max_clusters + 1):
+            kmeans = KMeans(n_clusters=k, random_state=42)
+            kmeans.fit(data)
+            inertias.append(kmeans.inertia_)
+            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
+        
+        # Use the elbow method to find the optimal number of clusters
+        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
+        elbow = kl.elbow if kl.elbow else max_clusters
+        
+        # Find the number of clusters with the highest silhouette score
+        silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
+        
+        # Return the smaller of the two to be conservative
+        return min(elbow, silhouette_optimal)
+    
+    
 
     def getNormMethods(self):
         """Get the list of available normalization methods."""
