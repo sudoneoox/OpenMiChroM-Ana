@@ -8,9 +8,10 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap.umap_ as umap
-from numba import jit
+from numba import jit, prange
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
+
 
 @jit(nopython=True)
 def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
@@ -287,10 +288,13 @@ class ComputeHelpersCPU:
         Returns:
             np.array: The Pearson correlation distance matrix.
         """
-        mean = np.mean(X, axis=1, keepdims=True)
-        std = np.std(X, axis=1, keepdims=True)
-        normalized_X = self.safe_divide(X - mean, std)
-        corr = np.dot(normalized_X, normalized_X.T) / X.shape[1]
+        def _pearson_row(i):
+            mean_i = np.mean(X[i])
+            std_i = np.std(X[i])
+            normalized_i = self.safe_divide(X[i] - mean_i, std_i)
+            return np.dot(normalized_i, X.T) / X.shape[1]
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            corr = np.array(list(executor.map(_pearson_row, range(X.shape[0]))))
         return 1 - corr
     
     def spearman_distance(self, X: np.array) -> np.array:
@@ -303,9 +307,15 @@ class ComputeHelpersCPU:
         Returns:
             np.array: The Spearman correlation distance matrix.
         """
-        rank_data = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, X)
-        return self.pearson_distance(rank_data)
+        def _spearman_row(i):
+            rank_i = np.argsort(np.argsort(X[i]))
+            return np.dot(rank_i, X.T) / X.shape[1]
 
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            corr = np.array(list(executor.map(_spearman_row, range(X.shape[0]))))
+
+        return 1 - corr
+    
     def log2_contact_distance(self, X: np.array) -> np.array:
         """
         Calculate log2 contact distance.
@@ -427,7 +437,13 @@ class ComputeHelpersCPU:
         """
         pca = PCA(n_components=n_components)
         result = pca.fit_transform(X)
-        feature_importance = abs(pca.components_[0])
+        
+        def _feature_importance(idx):
+            return abs(pca.components_[0][idx])
+
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            feature_importance = list(executor.map(_feature_importance, range(X.shape[1])))
+
         sorted_idx = np.argsort(feature_importance)
         print("Feature Importance: ")
         for idx in sorted_idx[-10:]: # print top 10 features
@@ -533,13 +549,17 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Cluster labels.
         """
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, **kwargs)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_jobs=self.n_jobs, **kwargs)
         labels = kmeans.fit_predict(X)
-        inertias = []
-        for k in range(1, n_clusters):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(X)
-            inertias.append(kmeans.inertia_)
+
+        def _calculate_inertia(k):
+            kmeans_k = KMeans(n_clusters=k, random_state=42, n_jobs=1)
+            kmeans_k.fit(X)
+            return kmeans_k.inertia_
+
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            inertias = list(executor.map(_calculate_inertia, range(1, n_clusters)))
+
         return labels, {
             'inertia': inertias,
             'cluster_centers': kmeans.cluster_centers_,
@@ -698,23 +718,21 @@ class ComputeHelpersCPU:
         Returns:
             int: Optimal number of clusters.
         """
-        inertias = []
-        silhouette_scores = []
+        def _calculate_metrics(k):
+            kmeans = KMeans(n_clusters=k, random_state=42, n_jobs=1)
+            labels = kmeans.fit_predict(data)
+            return (kmeans.inertia_, silhouette_score(data, labels))
+
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            results = list(executor.map(_calculate_metrics, range(2, max_clusters + 1)))
         
-        for k in range(2, max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(data)
-            inertias.append(kmeans.inertia_)
-            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
+        inertias, silhouette_scores = zip(*results)
         
-        # Use the elbow method to find the optimal number of clusters
         kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
         elbow = kl.elbow if kl.elbow else max_clusters
         
-        # Find the number of clusters with the highest silhouette score
         silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
         
-        # Return the smaller of the two to be conservative
         return min(elbow, silhouette_optimal)
     
     
