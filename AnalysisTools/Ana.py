@@ -1,27 +1,14 @@
-from AnalysisTools.Plot_Helper import PlotHelper
-from OpenMiChroM.CndbTools import cndbTools
-from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
+from AnalysisTools.PlotHelper import PlotHelper
+from AnalysisTools.cndbToolsMini import cndbToolsMini as cndbTools
 
-# NOTE
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
-from sklearn.feature_selection import VarianceThreshold
-from sklearn.covariance import EllipticEnvelope
-from sklearn.decomposition import KernelPCA
-
-from sklearn.cluster import SpectralClustering
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 from sklearn.utils import resample
-from sklearn.neighbors import NearestNeighbors
 
-from scipy.cluster.hierarchy import linkage, fcluster
+
+from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import cdist
-from scipy.sparse import csgraph
-from scipy.sparse.linalg import eigsh
 
 import numpy as np
-import umap
-import ivis
 import os 
 
 
@@ -50,10 +37,6 @@ class Ana:
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
         self.showPlots = showPlots
-        if self.showPlots:
-            self.plot_helper = PlotHelper()
-        else:
-            self.plot_helper = None
         
         if analysisStoragePath == "":
             self.outPath = os.path.join(os.getcwd(), 'Analysis')
@@ -62,35 +45,22 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
-        if isinstance(execution_mode, dict):
-            mode = execution_mode.get("mode", "cpu")
-            params = execution_mode.get("execParams", {})
-        elif isinstance(execution_mode, ComputeHelpersCPU):
-            mode = "custom"
-            self.compute_helpers = execution_mode
+        self.compute_helpers = self.setExecutionMode(execution_mode, **kwargs)
+        if self.showPlots:
+            self.plot_helper = PlotHelper()
         else:
-            mode = execution_mode
-            params = kwargs
+            self.plot_helper = None
             
-        if mode.lower() == "gpu":
-            pass
-            from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
-            self.compute_helpers = ComputeHelpersGPU(**params)
-        elif mode.lower() == "cpu":
-            self.compute_helpers = ComputeHelpersCPU(**params)
-        elif mode!= "custom":
-            raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
         
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
-            
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
+        self.compute_helpers.setMem(memory_locatoin=self.cache_path)
+
             
             
     def add_dataset(self, label: str, folder: str):
@@ -253,6 +223,7 @@ class Ana:
         
         
         pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components)
+        labels = np.repeat(np.arange(len(args)), [len(self.datasets[arg]['trajectories']) for arg in args]) #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
         
         cumulative_variance = np.cumsum(explained_variance_ratio)
         
@@ -264,6 +235,7 @@ class Ana:
             plot_params = {
                 'outputFileName': f"{pcaPath}/pca_plot_{args}_{method}_{metric}_{norm}.png",
                 'plot_type': 'pcaplot',
+                'labels': labels, #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
                 'cmap': 'viridis',
                 'title': f'PCA of {args}',
                 'x_label': 'PC1',
@@ -321,7 +293,7 @@ class Ana:
         
         if self.showPlots:
             plot_param = {
-                'outputFileName': f'{tsnePath}/tsne_plot_{args}_{method}_{metric}.png',
+                'outputFileName': f'{tsnePath}/tsne_plot_{args}_{method}_{metric}_{norm}.png',
                 'cmap': 'viridis',
                 'plot_type': 'tsneplot',
                 'title': f't-SNE of {args}',
@@ -373,7 +345,7 @@ class Ana:
         
         if self.showPlots:
             self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params={
-                'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}.png'),
+                'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}_{norm}.png'),
                 'plot_type': 'umapplot',
                 'cmap': 'viridis',
                 'embedding': embedding,
@@ -391,47 +363,6 @@ class Ana:
             })
         return umap_result, embedding, graph
     
-    def ivis_clustering(self, *args: str, ivisParams: dict = None, sample_size: int = 5000, n_clusters: int = -1, method: str = 'weighted', metric: str="euclidean", norm: str = 'ice', n_components: int = 2) -> tuple:
-        """
-        Performs IVIS on the datasets and returns the IVIS results.
-
-        Args:
-            *args: (str): The labels to create the IVIS from.
-            ivisParams (dict, optional): Parameters for the IVIS algorithm. Default is None.
-            sample_size (int, optional): The sample size for IVIS. Default is 5000.
-            n_clusters (int, optional): Number of clusters for coloring. Default is 5.
-            method (str, optional): The method for hierarchical clustering. Default is 'weighted'.
-            metric (str, optional): The distance metric to use. Default is 'euclidean'.
-            norm (str, optional): The normalization method to use. Default is 'ice'.
-
-        Returns:
-            tuple: (np.array,) The IVIS results.
-        """
-        ivisPath = os.path.join(self.outPath, 'IVIS')
-        os.makedirs(ivisPath, exist_ok=True)
-        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
-        if X.shape[0] > sample_size:
-            X = resample(X, n_samples=sample_size, random_state=42)
-        ivis_result = self.compute_helpers.run_reduction('ivis', X, n_components=2,  **ivisParams or {})
-        
-        if self.showPlots:
-            self.plot_helper.plot(plot_type="ivisplot", data=ivis_result, plot_params={
-                'outputFileName': f'{ivisPath}/ivis_plot_{args}_{method}_{metric}_{norm}.png',
-                'plot_type': 'ivisplot',
-                'cmap': 'viridis',
-                'title': f'IVIS of {args}',
-                'x_label': 'IVIS 1',
-                'y_label': 'IVIS 2',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'sample_size': sample_size,
-                'n_clusters': n_clusters,
-                'size': 50,
-                'alpha': 0.7,
-            })
-        
-        return ivis_result
     
     def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 2) -> tuple:
         """
@@ -510,7 +441,7 @@ class Ana:
         print(f"n_components to reach 95% variance ratio {n_components_95}")
         if self.showPlots:
             plot_param = {
-                'outputFileName': f'{mdsPath}/mds_plot_{args}_{method}_{metric}.png',
+                'outputFileName': f'{mdsPath}/mds_plot_{args}_{method}_{metric}_{norm}.png',
                 'cmap': 'viridis',
                 'plot_type': 'mdsplot',
                 'title': f'MDS of {args}',
@@ -529,7 +460,7 @@ class Ana:
             self.plot_helper.plot(plot_type="mdsplot", data=(mds_result, stress, dissimilarity_matrix), plot_params=plot_param)
         return mds_result, stress, dissimilarity_matrix
     
-    def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, num_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+    def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, n_clusters: int = 5, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
         """
         Performs spectral clustering on the datasets and returns the clustering results.
 
@@ -544,20 +475,34 @@ class Ana:
         Returns:
             tuple: (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, silhouette_avg, calinski_harabasz, davies_bouldin)
         """
+        spectralPath = os.path.join(self.outPath, 'SpectralClustering')
+        os.makedirs(spectralPath, exist_ok=True)
+
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
-        spectral_result = self.compute_helpers.run_clustering('spectral', X,  n_clusters=num_clusters, **spectralParams or {})
+        if n_clusters == -1:
+            n_clusters = self.compute_helpers.find_optimal_clusters(X, 20)
+            print(f'found optimal clusters: {n_clusters}')
+                
+        cluster_result, additional_info = self.compute_helpers.run_clustering('spectral', X, n_clusters=n_clusters, n_components=n_components, **spectralParams or {})
+        affinity_matrix = additional_info["affinity_matrix_"]
         if self.showPlots:
-            self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, spectral_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'spectral_clustering_plot_{args}_{method}_{metric}.png'),
+            self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, cluster_result, additional_info], plot_params={
+                'outputFileName': os.path.join(spectralPath, f'spectral_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
+                'plot_type': 'spectral',
+                'affinity_matrix_': affinity_matrix,
                 'cmap':'viridis',
-                'title': f'{args}',
+                'title': f'Spectral Clustering of {args}',
+                'method': method,
+                'metric': metric,
+                'norm': norm,
             })
-        return spectral_result
+        
+        return cluster_result, additional_info
     
     
-    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice',**kwargs) -> tuple:
         """
         Performs K-means clustering on the datasets.
 
@@ -573,22 +518,32 @@ class Ana:
         Returns:
             tuple: (cluster_labels, cluster_centers)
         """
+        kmeansPath = os.path.join(self.outPath, 'KMeans')
+        os.makedirs(kmeansPath, exist_ok=True)
+
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
+        if n_clusters == -1:
+            n_clusters = self.compute_helpers.find_optimal_clusters(X, 20)
         
-        kmeans_result = self.compute_helpers.run_clustering('kmeans', X,  n_clusters=n_clusters, **kwargs)
-        
+        kmeans_result, additional_info = self.compute_helpers.run_clustering('kmeans', X, n_clusters=n_clusters, **kwargs)
+        inertia = additional_info['inertia']
         if self.showPlots:
-            self.plot_helper.plot(plot_type="kmeans", data=[X, kmeans_result[0]], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'kmeans_clustering_plot_{args}_{method}_{metric}.png'),
+            self.plot_helper.plot(plot_type="kmeansclusteringplot", data=[X, kmeans_result, additional_info], plot_params={
+                'outputFileName': os.path.join(kmeansPath, f'kmeans_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
+                'plot_type': 'kmeans',
                 'cmap':'viridis',
-                'title': f'{args}',
+                'title': f'KMeans Clustering of {args}',
+                'inertia':inertia,
+                'method': method,
+                'metric': metric,
+                'norm': norm,
             })
         
-        return kmeans_result
+        return kmeans_result, additional_info
 
-    def dbscan_clustering(self, *args: str, eps: float = 0.5, min_samples: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+    def dbscan_clustering(self, *args: str, eps: float = 0.5, min_samples: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
         """
         Performs DBSCAN clustering on the datasets.
 
@@ -605,22 +560,29 @@ class Ana:
         Returns:
             np.array: Cluster labels
         """
+        dbscanPath = os.path.join(self.outPath, 'DBSCANClustering')
+        os.makedirs(dbscanPath, exist_ok=True)
+
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        dbscan_result = self.compute_helpers.run_clustering('dbscan', X,  eps=eps, min_samples=min_samples, **kwargs)
+        dbscan_result, additional_info = self.compute_helpers.run_clustering('dbscan', X, eps=eps, min_samples=min_samples, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="dbscan", data=[X, dbscan_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'dbscan_clustering_plot_{args}_{method}_{metric}.png'),
+            self.plot_helper.plot(plot_type="clustering", data=[X, dbscan_result, additional_info], plot_params={
+                'outputFileName': os.path.join(dbscanPath, f'dbscan_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
+                'plot_type': 'dbscan',
                 'cmap':'viridis',
-                'title': f'{args}',
+                'title': f'DBSCAN Clustering of {args}',
+                'method': method,
+                'metric': metric,
+                'norm': norm,
             })
         
-        return dbscan_result
+        return dbscan_result, additional_info
 
-    def hierarchical_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'ward', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+    def hierarchical_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'ward', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
         """
         Performs hierarchical clustering on the datasets.
 
@@ -636,22 +598,29 @@ class Ana:
         Returns:
             np.array: Cluster labels
         """
+        hierarchicalPath = os.path.join(self.outPath, 'HierarchicalClustering')
+        os.makedirs(hierarchicalPath, exist_ok=True)
+
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        hierarchical_result = self.compute_helpers.run_clustering('hierarchical', X,  n_clusters=n_clusters, linkage_method=method, **kwargs)
+        hierarchical_result, additional_info = self.compute_helpers.run_clustering('hierarchical', X, n_clusters=n_clusters, linkage_method=method, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="hierarchical", data=[X, hierarchical_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}.png'),
+            self.plot_helper.plot(plot_type="clustering", data=[X, hierarchical_result, additional_info], plot_params={
+                'outputFileName': os.path.join(hierarchicalPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
+                'plot_type': 'hierarchical',
                 'cmap':'viridis',
-                'title': f'{args}',
+                'title': f'Hierarchical Clustering of {args}',
+                'method': method,
+                'metric': metric,
+                'norm': norm,
             })
         
-        return hierarchical_result
+        return hierarchical_result, additional_info
 
-    def optics_clustering(self, *args: str, min_samples: int = 5, xi: float = 0.05, min_cluster_size: float = 0.05, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> np.array:
+    def optics_clustering(self, *args: str, min_samples: int = 5, xi: float = 0.05, min_cluster_size: float = 0.05, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
         """
         Performs OPTICS clustering on the datasets.
 
@@ -669,27 +638,34 @@ class Ana:
         Returns:
             np.array: Cluster labels
         """
+        opticsPath = os.path.join(self.outPath, 'OPTICSClustering')
+        os.makedirs(opticsPath, exist_ok=True)
+
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        optics_result = self.compute_helpers.run_clustering('optics', X,  min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
+        optics_result, additional_info = self.compute_helpers.run_clustering('optics', X, min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="optics", data=[X, optics_result], plot_params={
-                'outputFileName': os.path.join(self.outPath, f'optics_clustering_plot_{args}_{method}_{metric}.png'),
+            self.plot_helper.plot(plot_type="clustering", data=[X, optics_result, additional_info], plot_params={
+                'outputFileName': os.path.join(opticsPath, f'optics_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
+                'plot_type': 'optics',
                 'cmap':'viridis',
-                'title': f'{args}',
+                'title': f'OPTICS Clustering of {args}',
+                'method': method,
+                'metric': metric,
+                'norm': norm,
             })
         
-        return optics_result
+        return optics_result, additional_info
 
 
     """=========================================UTILITIES========================================"""
 
 
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False, expiremental: bool = True) -> tuple:
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
         """
         Calculate and cache the distance matrix and linkage matrix for given datasets.
 
@@ -702,6 +678,16 @@ class Ana:
         Returns:
             tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
         """
+        if self.execution_mode.lower() == 'cuda':
+            return self.compute_helpers.calc_XZ(
+                datasets=self.datasets,
+                args=args,
+                cache_path=self.cache_path,
+                method=method,
+                metric=metric,
+                norm=norm,
+                overrideCache=overrideCache
+            )
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         
@@ -771,10 +757,6 @@ class Ana:
         if np.any(non_finite_mask):
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
-        
-        if expiremental:
-            scaler = StandardScaler()
-            X = scaler.fit_transform(X)
             
         # Perform linkage
         try:
@@ -814,8 +796,26 @@ class Ana:
         self.cache_path = os.path.join(os.getcwd(), path)
         os.makedirs(self.cache_path, exist_ok=True)
     
-    def setExecutionMode(self, execMode: str):
-        self.execution_mode = execMode
+    def setExecutionMode(self, execution_mode, **kwargs):
+        from CompHelperCPU import ComputeHelpersCPU
+        
+        if isinstance(execution_mode, dict):
+            mode = execution_mode.get("mode", "cpu")
+            params = execution_mode.get("execParams", {})
+        elif isinstance(execution_mode, ComputeHelpersCPU):
+            mode = "custom"
+            self.compute_helpers = execution_mode
+        else:
+            mode = execution_mode
+            params = kwargs
+            
+        if mode.lower() == "gpu" or mode.lower() == "cuda":
+            from AnalysisTools.CompHelperGPU import ComputeHelpersGPU
+            self.compute_helpers = ComputeHelpersGPU(**params)
+        elif mode.lower() == "cpu":
+            self.compute_helpers = ComputeHelpersCPU(**params)
+        elif mode!= "custom":
+            raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
     
     def setShowPlots(self, show: bool):
         self.showPlots = show

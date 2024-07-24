@@ -11,7 +11,6 @@ import umap.umap_ as umap
 from numba import jit
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
-import os
 
 @jit(nopython=True)
 def _ice_normalization_numba(matrix, max_iter=100, tolerance=1e-5):
@@ -116,7 +115,7 @@ class ComputeHelpersCPU:
             'svd': self._svd_reduction,
             'tsne': self._tsne_reduction,
             'umap': self._umap_reduction,
-            'mds': self._mds_reduction
+            'mds': self._mds_reduction,
         }
         
         self.clustering_methods = {
@@ -395,7 +394,7 @@ class ComputeHelpersCPU:
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
-    def run_reduction(self, method, X, n_components):
+    def run_reduction(self, method, X, n_components, **kwargs):
         """
         Run the specified dimensionality reduction method.
 
@@ -403,14 +402,13 @@ class ComputeHelpersCPU:
             method (str): The reduction method to use.
             X (np.array): Input data.
             n_components (int): Number of components for the reduction.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: Reduced data and additional information (if available).
         """
         try:
             with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                return executor.submit(self.reduction_methods[method], X, n_components).result()
+                return executor.submit(self.reduction_methods[method], X, n_components,  **kwargs).result()
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
         
@@ -423,7 +421,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: PCA result, explained variance ratio, and components.
@@ -446,7 +443,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             np.array: SVD result.
@@ -464,7 +460,6 @@ class ComputeHelpersCPU:
             Args:
                 X (np.array): Input data.
                 n_components (int): Number of components.
-                n_jobs (int): Number of jobs to run in parallel.
 
             Returns:
                 tuple: t-SNE result, KL divergence, and None (for consistency with other methods).
@@ -480,7 +475,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: UMAP result, embedding, and graph.
@@ -496,7 +490,6 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_components (int): Number of components.
-            n_jobs (int): Number of jobs to run in parallel.
 
         Returns:
             tuple: MDS result, stress, and dissimilarity matrix.
@@ -504,10 +497,11 @@ class ComputeHelpersCPU:
         mds = MDS(n_components=n_components, n_jobs=self.n_jobs)
         result = mds.fit_transform(X)
         return result, mds.stress_, mds.dissimilarity_matrix_
-
+    
+    
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, **kwargs):
+    def run_clustering(self, method, X, n_components:int = 0, n_clusters: int = 2, **kwargs):
         """
         Run the specified clustering method.
 
@@ -522,11 +516,11 @@ class ComputeHelpersCPU:
         """
         try:
             with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                return executor.submit(self.clustering_methods[method], X, n_jobs=self.n_jobs, **kwargs).result()
+                return executor.submit(self.clustering_methods[method], X, n_clusters=n_clusters, n_components=n_components, **kwargs).result()
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
 
-    def _kmeans_clustering(self, X: np.array, n_clusters: int, **kwargs):
+    def _kmeans_clustering(self, X: np.array, n_clusters: int, n_components: int, **kwargs):
         """
         Perform K-means clustering.
 
@@ -539,9 +533,20 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Cluster labels.
         """
-        return KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, **kwargs)
+        labels = kmeans.fit_predict(X)
+        inertias = []
+        for k in range(1, n_clusters):
+            kmeans = KMeans(n_clusters=k, random_state=42)
+            kmeans.fit(X)
+            inertias.append(kmeans.inertia_)
+        return labels, {
+            'inertia': inertias,
+            'cluster_centers': kmeans.cluster_centers_,
+            'n_iter': kmeans.n_iter_
+        }
 
-    def _spectral_clustering(self, X, n_clusters, **kwargs):
+    def _spectral_clustering(self, X: np.array, n_clusters: int, n_components: int, **kwargs):
         """
         Perform Spectral clustering.
 
@@ -552,10 +557,15 @@ class ComputeHelpersCPU:
             **kwargs: Additional arguments for SpectralClustering.
 
         Returns:
-            np.array: Cluster labels.
+            np.array: Cluster labels. dict: additional info.
         """
         from sklearn.cluster import SpectralClustering
-        return SpectralClustering(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        spectral = SpectralClustering(n_clusters=n_clusters,n_components=n_components, **kwargs)
+        labels = spectral.fit_predict(X)
+        return labels, {
+            'affinity_matrix_': spectral.affinity_matrix_,
+            'n_features_in': spectral.n_features_in_
+        }
 
     def _hierarchical_clustering(self, X, n_clusters, **kwargs):
         """
@@ -571,8 +581,12 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from scipy.cluster.hierarchy import linkage, fcluster
-        Z = linkage(X, method=kwargs.get('method', 'ward'), metric=kwargs.get('metric', 'euclidean'))
-        return fcluster(Z, t=n_clusters, criterion='maxclust')
+        linkage_matrix = linkage(X, method=kwargs.get('method', 'ward'))
+        labels = fcluster(linkage_matrix, t=n_clusters, criterion='maxclust')
+        return labels, {
+            'linkage_matrix': linkage_matrix
+        }
+
 
     def _dbscan_clustering(self, X, eps, min_samples, **kwargs):
         """
@@ -589,7 +603,13 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from sklearn.cluster import DBSCAN
-        return DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        dbscan = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=self.n_jobs, **kwargs)
+        labels = dbscan.fit_predict(X)
+        return labels, {
+            'core_sample_indices': dbscan.core_sample_indices_,
+            'components': dbscan.components_,
+            'n_features_in': dbscan.n_features_in_
+        }
 
     def _optics_clustering(self, X, min_samples, xi, min_cluster_size, **kwargs):
         """
@@ -607,41 +627,19 @@ class ComputeHelpersCPU:
             np.array: Cluster labels.
         """
         from sklearn.cluster import OPTICS
-        return OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs).fit_predict(X)
+        optics = OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, n_jobs=self.n_jobs, **kwargs)
+        labels = optics.fit_predict(X)
+        return labels, {
+            'reachability': optics.reachability_,
+            'ordering': optics.ordering_,
+            'core_distances': optics.core_distances_,
+            'predecessor': optics.predecessor_
+        }
 
-    def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
+
+    def evaluate_clustering(self, data, cluster_labels):
         """
-        Find the optimal number of clusters using the elbow method and silhouette score.
-
-        Args:
-            data (np.array): Input data for clustering.
-            max_clusters (int): Maximum number of clusters to consider.
-
-        Returns:
-            int: Optimal number of clusters.
-        """
-        inertias = []
-        silhouette_scores = []
-        
-        for k in range(2, max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, random_state=42)
-            kmeans.fit(data)
-            inertias.append(kmeans.inertia_)
-            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
-        
-        # Use the elbow method to find the optimal number of clusters
-        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
-        elbow = kl.elbow if kl.elbow else max_clusters
-        
-        # Find the number of clusters with the highest silhouette score
-        silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
-        
-        # Return the smaller of the two to be conservative
-        return min(elbow, silhouette_optimal)
-
-    def evaluate_clustering(self, data, n_clusters=5):
-        """
-        Evaluate clustering quality using various metrics on GPU.
+        Evaluate clustering quality using various metrics on CPU.
 
         Args:
             data (cp.array): Input data used for clustering.
@@ -650,8 +648,7 @@ class ComputeHelpersCPU:
         Returns:
             cluster_labels, array: [Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index].
         """
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        cluster_labels = kmeans.fit_predict(data)
+
         
         silhouette = silhouette_score(data, cluster_labels)
         calinski_harabasz = calinski_harabasz_score(data, cluster_labels)
@@ -689,6 +686,38 @@ class ComputeHelpersCPU:
             list: List of cached distance matrices.
         """
         return self.memory.cache(self._calc_dist_wrapper)(trajectories, metric)
+    
+    def find_optimal_clusters(self, data: np.array, max_clusters: int=10):
+        """
+        Find the optimal number of clusters using the elbow method and silhouette score.
+
+        Args:
+            data (np.array): Input data for clustering.
+            max_clusters (int): Maximum number of clusters to consider.
+
+        Returns:
+            int: Optimal number of clusters.
+        """
+        inertias = []
+        silhouette_scores = []
+        
+        for k in range(2, max_clusters + 1):
+            kmeans = KMeans(n_clusters=k, random_state=42)
+            kmeans.fit(data)
+            inertias.append(kmeans.inertia_)
+            silhouette_scores.append(silhouette_score(data, kmeans.labels_))
+        
+        # Use the elbow method to find the optimal number of clusters
+        kl = KneeLocator(range(2, max_clusters + 1), inertias, curve='convex', direction='decreasing')
+        elbow = kl.elbow if kl.elbow else max_clusters
+        
+        # Find the number of clusters with the highest silhouette score
+        silhouette_optimal = silhouette_scores.index(max(silhouette_scores)) + 2
+        
+        # Return the smaller of the two to be conservative
+        return min(elbow, silhouette_optimal)
+    
+    
 
     def getNormMethods(self):
         """Get the list of available normalization methods."""
@@ -708,7 +737,7 @@ class ComputeHelpersCPU:
     
     def getMemStats(self):
         """Get memory statistics."""
-        return [self.memory.location, self.memory.verbose]
+        return self.memory.location
     
     def setMem(self, path: str, verbose: int = 0):
         """Set memory location and verbosity."""
@@ -717,3 +746,6 @@ class ComputeHelpersCPU:
     def safe_divide(self, a, b):
         """Safely divide two ararays, returning 0 where division by zero would occur"""
         return np.divide(a, b, out=np.zeros_like(a), where=b!=0)
+    
+    def getCpuCount(self):
+        return self.n_jobs

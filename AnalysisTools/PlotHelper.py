@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples
 
-from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
+from AnalysisTools.CompHelperCPU import ComputeHelpersCPU
 import os
 
 class PlotHelper:
@@ -183,9 +183,14 @@ class PlotHelper:
         result, additional_info, _ = data
         n_components = params.get('n_components', 2)
         plot_type = params.get("plot_type")
+        labels = params.get('labels')
+        
+        if labels is None:
+            kmeans = KMeans(n_clusters=params.get('n_clusters', 5), random_state=42)
+            labels = kmeans.fit_predict(result)
 
         # Perform clustering and evaluation
-        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result, n_clusters=params.get('n_clusters', 5))
+        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result,labels)
         
         fig = plt.figure(figsize=params['figsize'])
         
@@ -252,8 +257,6 @@ class PlotHelper:
                 singular_values = embedding.flatten()[:5]  # Flatten to get a 1D array if embedding is 2D
                 singular_values_text = "UMAP Embedding: " + ", ".join([f"{val:.2f}" for val in singular_values])
                 plt.text(0.05, 0.95, singular_values_text, transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'ivisplot':
-            plt.text(0.05, 0.95, "IVIS projection", transform=ax.transAxes, verticalalignment='top')
         elif plot_type == 'svdplot':
             if isinstance(additional_info, np.ndarray):
                 singular_values_text = "Top singular values: " + ", ".join([f"{val:.2f}" for val in additional_info[:5]])
@@ -290,6 +293,140 @@ class PlotHelper:
             f.write(log_info)
 
         print(log_info) 
+        
+    def _clustering_plot(self, data, params):
+        X, labels, additional_info = data
+        n_clusters = len(np.unique(labels))
+        plot_type = params['plot_type']
+        
+        labels, _ = self.compute_helpers.evaluate_clustering(X, labels)
+
+        fig = plt.figure(figsize=(20, 15))
+        gs = fig.add_gridspec(3, 3)
+
+        # Plot clustered data
+        ax1 = fig.add_subplot(gs[0, :2])
+        if X.shape[1] >= 2:
+            scatter = ax1.scatter(X[:, 0], X[:, 1], c=labels, cmap=params['cmap'], alpha=0.7)
+            ax1.set_xlabel('Feature 1')
+            ax1.set_ylabel('Feature 2')
+        else:
+            scatter = ax1.scatter(range(len(X)), X.ravel(), c=labels, cmap=params['cmap'], alpha=0.7)
+            ax1.set_xlabel('Sample Index')
+            ax1.set_ylabel('Feature Value')
+        ax1.set_title(f'{plot_type.capitalize()} Clustering')
+        plt.colorbar(scatter, ax=ax1, label='Cluster')
+
+        # Plot silhouette
+        ax2 = fig.add_subplot(gs[1, :2])
+        silhouette_avg = _[0]
+        self._plot_silhouette(ax2, X, labels, n_clusters, silhouette_avg)
+
+        # Plot cluster sizes
+        ax3 = fig.add_subplot(gs[2, 0])
+        unique, counts = np.unique(labels, return_counts=True)
+        ax3.bar(unique, counts)
+        ax3.set_title('Cluster Sizes')
+        ax3.set_xlabel('Cluster')
+        ax3.set_ylabel('Number of Samples')
+
+        # Display metrics
+        metrics_text = (f"Silhouette Score: {silhouette_avg:.4f}\n"
+                        f"Calinski-Harabasz Score: {_[1]:.4f}\n"
+                        f"Davies-Bouldin Score: {_[2]:.4f}")
+
+        ax4 = fig.add_subplot(gs[:, 2])
+        ax4.axis('off')
+        ax4.text(0.1, 0.7, metrics_text, fontsize=12, verticalalignment='top')
+
+        # Method-specific plots
+        if plot_type == 'kmeans':
+            ax5 = fig.add_subplot(gs[2, 1])
+            inertias = params.get('inertias', [])  # Get list of inertias for different k
+            if inertias:
+                ax5.plot(range(1, len(inertias) + 1), inertias)
+                ax5.set_title('Elbow Method')
+                ax5.set_xlabel('Number of Clusters (k)')
+                ax5.set_ylabel('Inertia')
+            else:
+                ax5.text(0.5, 0.5, 'Inertia data not available', ha='center', va='center')
+
+        elif plot_type == 'spectral':
+            ax5 = fig.add_subplot(gs[2, 1])
+
+            affinity_matrix = params.get('affinity_matrix_')
+            ax5.imshow(affinity_matrix, cmap=params.get('cmap'))
+            ax5.set_title('Affinity Matrix')
+            ax5.set_xlabel('Sample Index')
+            ax5.set_ylabel('Sample Index')
+ 
+        elif plot_type == 'hierarchical':
+            from scipy.cluster.hierarchy import dendrogram
+            ax5 = fig.add_subplot(gs[2, 1])
+            dendrogram(additional_info['linkage_matrix'], ax=ax5, truncate_mode='lastp', p=10)
+            ax5.set_title('Dendrogram')
+
+        elif plot_type == 'dbscan':
+            ax5 = fig.add_subplot(gs[2, 1])
+            core_samples_mask = np.zeros_like(labels, dtype=bool)
+            core_samples_mask[additional_info['core_sample_indices']] = True
+            unique, counts = np.unique(labels[core_samples_mask], return_counts=True)
+            ax5.bar(unique, counts)
+            ax5.set_title('Core Point Distribution')
+            ax5.set_xlabel('Cluster')
+            ax5.set_ylabel('Number of Core Points')
+
+        elif plot_type == 'optics':
+            ax5 = fig.add_subplot(gs[2, 1])
+            ax5.plot(additional_info['reachability'])
+            ax5.set_title('Reachability Plot')
+            ax5.set_xlabel('Points')
+            ax5.set_ylabel('Reachability Distance')
+
+        plt.tight_layout()
+        self._save_and_show(params)
+
+        # Prepare logging information
+        log_info = f"""
+        {'='*50}
+        File: {params.get('outputFileName')}
+        {'='*50}
+        Parameters:
+        - Plot Type: {plot_type}
+        - Number of Clusters: {n_clusters}
+        - Method: {params.get('method')}
+        - Metric: {params.get('metric')}
+        - Norm: {params.get('norm')}
+
+        Results:
+        {metrics_text}
+        """
+
+        # Write to log file
+        log_dir = os.path.dirname(params.get('outputFileName'))
+        log_path = os.path.join(log_dir, 'clustering_log.txt')
+        with open(log_path, "a") as f:
+            f.write(log_info)
+
+        print(log_info)
+
+    def _plot_silhouette(self, ax, X, labels, n_clusters, silhouette_avg):
+        sample_silhouette_values = silhouette_samples(X, labels)
+        y_lower = 10
+        for i in range(n_clusters):
+            ith_cluster_silhouette_values = sample_silhouette_values[labels == i]
+            ith_cluster_silhouette_values.sort()
+            size_cluster_i = ith_cluster_silhouette_values.shape[0]
+            y_upper = y_lower + size_cluster_i
+            color = plt.cm.nipy_spectral(float(i) / n_clusters)
+            ax.fill_betweenx(np.arange(y_lower, y_upper), 0, ith_cluster_silhouette_values,
+                             facecolor=color, edgecolor=color, alpha=0.7)
+            y_lower = y_upper + 10
+        ax.set_title("Silhouette plot for the various clusters")
+        ax.set_xlabel("Silhouette coefficient values")
+        ax.set_ylabel("Cluster label")
+        ax.axvline(x=silhouette_avg, color="red", linestyle="--")
+        ax.set_yticks([])  # Clear the yaxis labels / ticks
             
     def _pcaplot(self, data, params):
         """
@@ -333,20 +470,6 @@ class PlotHelper:
         """
         print("\nUMAP Plot:")
         self._dimensionality_reduction_plot(data, params)
-
-    def _ivisplot(self, data, params):
-        """
-        Create an ivis plot.
-
-        Args:
-            data (list): [ivis_results, cluster_labels]
-            params (dict): Plotting parameters.
-
-        Returns:
-            None
-        """
-        print("\nivis Plot:")
-        self._dimensionality_reduction_plot(data, params)
         
  
     def _svdplot(self, data, params):
@@ -377,95 +500,31 @@ class PlotHelper:
         print("\nMDS Plot:")
         self._dimensionality_reduction_plot(data, params)
  
-    def _spectralclusteringplot(self, data, cluster_results, params):
+    def _spectralclusteringplot(self, data, params):
         """
         Create a comprehensive spectral clustering plot.
 
         Args:
             data (np.array): The original data.
-            cluster_results (tuple): Results from spectral_clustering method.
             params (dict): Plotting parameters.
 
         Returns:
             None
         """
-        (cluster_labels, eigenvalues, eigenvectors, affinity_matrix, 
-         silhouette_avg, calinski_harabasz, davies_bouldin) = cluster_results
+        return self._clustering_plot(data, params)
+    
+    def _kmeansclusteringplot(self, data, params):
+        """_kmeansclusteringplot 
+
+        Create a comprehensive spectral clustering plot.
+
+        Args:
+            data (np.array): The original data.
+            params (dict): Plotting parameters.
+        """
+        return self._clustering_plot(data, params)
         
-        n_clusters = len(np.unique(cluster_labels))
-
-        fig = plt.figure(figsize=(20, 15))
-        gs = fig.add_gridspec(3, 3)
-
-        # Plot spectral embedding
-        ax1 = fig.add_subplot(gs[0, 0])
-        ax1.scatter(eigenvectors[:, 0], eigenvectors[:, 1], c=cluster_labels, cmap='viridis')
-        ax1.set_title('Spectral Embedding')
-        ax1.set_xlabel('First eigenvector')
-        ax1.set_ylabel('Second eigenvector')
-
-        # Plot original data with clustering results
-        ax2 = fig.add_subplot(gs[0, 1])
-        ax2.scatter(data[:, 0], data[:, 1], c=cluster_labels, cmap='viridis')
-        ax2.set_title('Clustered Data')
-        ax2.set_xlabel('Feature 1')
-        ax2.set_ylabel('Feature 2')
-
-        # Plot eigenvalues
-        ax3 = fig.add_subplot(gs[0, 2])
-        ax3.plot(range(1, len(eigenvalues) + 1), eigenvalues, 'bo-')
-        ax3.set_title('Eigenvalues')
-        ax3.set_xlabel('Index')
-        ax3.set_ylabel('Eigenvalue')
-
-        # Plot silhouette
-        ax4 = fig.add_subplot(gs[1, 0])
-        self._plot_silhouette(ax4, data, cluster_labels, n_clusters, silhouette_avg)
-
-        # Plot affinity matrix
-        ax5 = fig.add_subplot(gs[1, 1])
-        sns.heatmap(affinity_matrix.toarray(), ax=ax5, cmap='viridis')
-        ax5.set_title('Affinity Matrix')
-
-        # Plot first few eigenvectors
-        ax6 = fig.add_subplot(gs[1, 2])
-        for i in range(min(5, n_clusters)):
-            ax6.plot(eigenvectors[:, i], label=f'Eigenvector {i+1}')
-        ax6.legend()
-        ax6.set_title('First Few Eigenvectors')
-        ax6.set_xlabel('Data point index')
-        ax6.set_ylabel('Eigenvector value')
-
-        # Display metrics
-        metrics_text = (f"Silhouette Score: {silhouette_avg:.4f}\n"
-                        f"Calinski-Harabasz Score: {calinski_harabasz:.4f}\n"
-                        f"Davies-Bouldin Score: {davies_bouldin:.4f}")
-
-        ax7 = fig.add_subplot(gs[2, :])
-        ax7.axis('off')
-        ax7.text(0.1, 0.7, metrics_text, fontsize=12, verticalalignment='top')
-
-        plt.tight_layout()
-        self._save_and_show(params)
-        
-    def _plot_silhouette(self, ax, data, cluster_labels, n_clusters, silhouette_avg):
-        sample_silhouette_values = silhouette_samples(data, cluster_labels)
-        y_lower = 10
-        for i in range(n_clusters):
-            ith_cluster_silhouette_values = sample_silhouette_values[cluster_labels == i]
-            ith_cluster_silhouette_values.sort()
-            size_cluster_i = ith_cluster_silhouette_values.shape[0]
-            y_upper = y_lower + size_cluster_i
-            color = plt.cm.nipy_spectral(float(i) / n_clusters)
-            ax.fill_betweenx(np.arange(y_lower, y_upper), 0, ith_cluster_silhouette_values,
-                             facecolor=color, edgecolor=color, alpha=0.7)
-            y_lower = y_upper + 10
-        ax.set_title("Silhouette plot for the various clusters")
-        ax.set_xlabel("Silhouette coefficient values")
-        ax.set_ylabel("Cluster label")
-        ax.axvline(x=silhouette_avg, color="red", linestyle="--")
-        ax.set_yticks([])  # Clear the yaxis labels / ticks
-
+ 
         
     def _save_and_show(self, params):
         """

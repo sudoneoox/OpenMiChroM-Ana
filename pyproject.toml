@@ -1,32 +1,48 @@
 [tool.poetry]
 name = "OpenMiChroM-Ana"
 version = "0.1.0"
+packages = [{ include = "AnalysisTools" }]
 description = "A package for analyzing chromosome structure data"
-authors = ["Diego Coronado <dieoa2992@gmail.com>"]
+authors = ["Diego Coronado <diegoa2992@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-numpy = "^1.24.0"
-scipy = "^1.10.0"
-scikit-learn = "^1.2.0"
-joblib = "^1.2.0"
-numba = "^0.57.0"
-matplotlib = "^3.7.0"
+numpy = ">=1.21,<2.0.0"
+scipy = "^1.14.0"
+scikit-learn = "^1.5.0"
+joblib = "^1.4.0"
+numba = ">=0.57.0,<0.58.0"
+matplotlib = ">=3.7.0,<4.0.0"
 seaborn = "^0.12.0"
 umap-learn = "^0.5.4"
 kneed = "^0.8.1"
 pandas = "^2.0.0"
+h5py = ">=2.0.0,<3.11.0"
+
+[tool.poetry.extras]
+gpu = [
+    "cupy-cuda11x",
+    "cudf",
+    "cuml",
+    "cugraph",
+    "cuxfilter",
+    "cuproj",
+    "ucxx"
+]
 
 [tool.poetry.group.gpu]
 optional = true
 
 [tool.poetry.group.gpu.dependencies]
-cupy = "^12.0.0"
-
-[tool.poetry.packages]
-packages = [{ include = "AnalysisTools" }]
+cupy-cuda11x = "^12.0.0"
+cudf = "^24.0.0"
+cuml = "^24.0.0"
+cugraph = "^24.0.0"
+cuxfilter = "^24.0.0"
+cuproj = "^24.0.0"
+ucxx = "^0.39.0"
 
 [build-system]
 requires = ["poetry-core"]

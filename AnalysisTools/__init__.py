@@ -31,11 +31,17 @@ Note: GPU support requires a CUDA-enabled GPU and appropriate CUDA toolkit insta
 """
 
 
-from .Comp_Helper_CPU import ComputeHelpersCPU
-# from .Comp_Helper_GPU import ComputeHelpersGPU
+from .CompHelperCPU import ComputeHelpersCPU
 
-from .Plot_Helper import PlotHelper
+try:
+    from .CompHelperGPU import ComputeHelpersGPU
+except ImportError:
+    print("GPU support not available. Using CPU only.")
+    ComputeHelpersGPU = None
+
+from .PlotHelper import PlotHelper
 from .Ana import Ana 
+from .cndbToolsMini import cndbToolsMini
 
 
-__all__ = ['Ana', 'ComputeHelpersCPU', 'ComputeHelpersGPU', 'PlotHelper']
+__all__ = ['Ana', 'ComputeHelpersCPU', 'ComputeHelpersGPU', 'PlotHelper', 'cndbToolsMini']

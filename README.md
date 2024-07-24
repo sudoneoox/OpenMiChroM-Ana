@@ -1,96 +1,104 @@
-# OpenMiChroM-Ana
+# OpenMiChroM-Ana: Advanced Chromosome Structure Analysis Tool
 
-OpenMiChroM-Ana is a Python package for analyzing chromosome structure data. It provides tools for data processing, dimensionality reduction, clustering, and visualization of Hi-C and related genomic data. The package supports both CPU and GPU acceleration for computationally intensive tasks.
+## Overview
 
-## Features
+OpenMiChroM-Ana is a powerful Python package designed for comprehensive analysis of chromosome structure data. It offers a suite of tools for processing, analyzing, and visualizing Hi-C and related genomic data. With support for both CPU and GPU acceleration, OpenMiChroM-Ana provides researchers with a flexible and efficient platform for exploring complex genomic structures.
+## Key Features
 
-- Data loading and preprocessing for Hi-C and simulated data
-- Distance matrix calculations with various metrics
-- Normalization methods (ICE, KR, VC, log transform)
-- Dimensionality reduction techniques (PCA, SVD, t-SNE, UMAP, MDS)
-- Clustering algorithms (K-means, DBSCAN, Spectral, Hierarchical, OPTICS)
-- Clustering evaluation metrics
-- GPU acceleration for supported operations
-- Visualization tools for analysis results
+- Versatile Data Handling:
+  * Support for Hi-C and simulated chromosome structure data
+  * Efficient loading and preprocessing capabilities
+
+- Comprehensive Analysis Tools:
+  * Distance matrix calculations with multiple metrics
+  * Advanced normalization methods (ICE, KR, VC, log transform)
+  * State-of-the-art dimensionality reduction techniques (PCA, SVD, t-SNE, UMAP, MDS)
+  * Diverse clustering algorithms (K-means, DBSCAN, Spectral, Hierarchical, OPTICS)
+  * Robust clustering evaluation metrics
+
+- Performance Optimization:
+  * GPU acceleration for computationally intensive operations
+  * Efficient CPU implementations for broad compatibility
+
+- Visualization:
+  * Rich set of plotting tools for result interpretation
+  * Interactive visualizations for in-depth data exploration
+  * 
+<hr></hr>
 
 ## Installation
+### System Requirements
 
-### Prerequisites
-- Python 3.10
-- For GPU support: CUDA toolkit 11.8 or higher
+- Python 3.11 or higher
+- For GPU support: CUDA version 12.0 or higher
 
+### CPU Version Installation
 
-### CPU Version
-
-To install the CPU-only version of OpenMiChroM-Ana, run:
+For users who prefer CPU-parallel operations:
 
 ```bash
+# Navigate to the directory where the pyproject.toml is placed
 pip install .
 ```
 
-### GPU Version
-
-The GPU version requires CUDA and the RAPIDS suite of libraries. Follow these steps:
-- Install CUDA toolkit
-- create new conda or venv environment
+### GPU Enabled Version
+To leverage GPU acceleration:
+1. Install CUDA Libraries (version 12.0 or higher)
+2. Set up conda or virtual env
+3. Install RAPIDS Suite (follow instructions at https://docs.rapids.ai/install)
 
 ```bash
-conda create -n [envName] python=3.10
+conda create -n [envName] -c rapidsai -c conda-forge -c nvidia rapids=24.06 python=3.11 cuda-version=12.0
 conda activate [envName]
-```
-
-- Install RAPIDS Library
-```bash
-conda install -c rapidsai -c nvidia -c conda-forge cudf=23.08 cuml=23.08 cugraph=23.08 cudatoolkit=11.8
-```
-
-- Install OpenMiChroM-Ana with GPU support:
-```bash
+# Navigate to the directory where the pyproject.toml is placed
 pip install .[gpu]
 ```
+<hr></hr>
 
-
-## Usage
-Here's a basic example of how to use OpenMiChroM-Ana:
-
-### For CPU Usage
+## Quick Start Guide
+### Initializing the Analysis
+For CPU usage:
 ```python
 from OpenMiChroM_Ana import Ana
 
-# Initialize the analysis object
 analysis = Ana(showPlots=True, execution_mode='cpu', cacheStoragePath='/path/to/cache')
 ```
-### For GPU Usage
+For GPU usage:
 ```python
 from OpenMiChroM_Ana import Ana
 
-# Initialize the analysis object
 analysis = Ana(showPlots=True, execution_mode='gpu', cacheStoragePath='/path/to/cache')
 ```
-
-### Example
+### Basic Workflow Example
 ```python
-# Add datasets
-analysis.add_dataset(label="Dataset1", folder="data/Dataset1")
-analysis.add_dataset(label='Dataset2', folder='data/Dataset2')
+# Load datasets
+analysis.add_dataset(label="ExperimentA", folder="data/ExperimentA")
+analysis.add_dataset(label="ExperimentB", folder="data/ExperimentB")
 
-# Process trajectories
-analysis.process_trajectories(label="Dataset1", filename="traj_1.cndb", folder_pattern=['iteration_', [1, 20]])
-analysis.process_trajectories(label="Dataset2", filename="traj_2.cndb", folder_pattern=['iteration_', [1, 20]])
+# Process trajectory data
+analysis.process_trajectories(label="ExperimentA", filename="traj_A.cndb", folder_pattern=['iteration_', [1, 20]])
+analysis.process_trajectories(label="ExperimentB", filename="traj_B.cndb", folder_pattern=['iteration_', [1, 20]])
 
-# Perform PCA
-pca_result = analysis.pca("Dataset1", "Dataset2", metric='euclidean', n_components=2, norm='ice', method='weighted')
+# Perform dimensionality reduction
+pca_result = analysis.pca("ExperimentA", "ExperimentB", metric='euclidean', n_components=2, norm='ice', method='weighted')
 
-# Perform clustering
-kmeans_result = analysis.kmeans_clustering("Dataset1", "Dataset2", n_clusters=5, metric='euclidean', norm='ice', method='weighted')
-# Generate plots
-# Plots will be saved automatically if showPlots=True
+# Conduct clustering analysis
+kmeans_result = analysis.kmeans_clustering("ExperimentA", "ExperimentB", n_clusters=5, metric='euclidean', norm='ice', method='weighted')
+
+# Visualize results
+# Plots are automatically saved if showPlots=True
 ```
-### Contributing
-Contributions to OpenMiChroM-Ana are welcome! Please feel free to submit a Pull Request.
+<hr></hr>
 
-### License
-This project is licensed under the MIT License - see the LICENSE file for details.
+## Contribution
+We welcome contributions to OpenMiChroM-Ana! Whether it's bug fixes, feature additions, or documentation improvements, your input is valuable. Please review our contribution guidelines before submitting a pull request.
 
-### Contact
-If you have any questions or feedback, please open an issue on the GitHub repository.
+<hr></hr>
+
+## License
+OpenMiChroM-Ana is distributed under the MIT License. See the LICENSE file in the repository for full details.
+
+<hr></hr>
+
+## Support and Contact
+For bug reports and feature requests, please use the GitHub issue tracker. 
