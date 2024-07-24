@@ -24,7 +24,7 @@ OpenMiChroM-Ana is a powerful Python package designed for comprehensive analysis
   * Rich set of plotting tools for result interpretation
   * Interactive visualizations for in-depth data exploration
   * 
-<hr></hr>
+
 
 ## Installation
 ### System Requirements
@@ -53,7 +53,7 @@ conda activate [envName]
 # Navigate to the directory where the pyproject.toml is placed
 pip install .[gpu]
 ```
-<hr></hr>
+
 
 ## Quick Start Guide
 ### Initializing the Analysis
@@ -88,17 +88,16 @@ kmeans_result = analysis.kmeans_clustering("ExperimentA", "ExperimentB", n_clust
 # Visualize results
 # Plots are automatically saved if showPlots=True
 ```
-<hr></hr>
+
 
 ## Contribution
 We welcome contributions to OpenMiChroM-Ana! Whether it's bug fixes, feature additions, or documentation improvements, your input is valuable. Please review our contribution guidelines before submitting a pull request.
 
-<hr></hr>
+
 
 ## License
 OpenMiChroM-Ana is distributed under the MIT License. See the LICENSE file in the repository for full details.
 
-<hr></hr>
 
 ## Support and Contact
 For bug reports and feature requests, please use the GitHub issue tracker. 
