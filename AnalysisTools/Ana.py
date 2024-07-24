@@ -1,7 +1,5 @@
-from AnalysisTools.Plot_Helper import PlotHelper
-from OpenMiChroM.CndbTools import cndbTools
-from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
-from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
+from AnalysisTools.PlotHelper import PlotHelper
+from AnalysisTools.cndbToolsMini import cndbToolsMini as cndbTools
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import resample
@@ -39,10 +37,6 @@ class Ana:
         self.cndbTools = cndbTools()
         self.execution_mode = execution_mode
         self.showPlots = showPlots
-        if self.showPlots:
-            self.plot_helper = PlotHelper()
-        else:
-            self.plot_helper = None
         
         if analysisStoragePath == "":
             self.outPath = os.path.join(os.getcwd(), 'Analysis')
@@ -51,35 +45,22 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
-        if isinstance(execution_mode, dict):
-            mode = execution_mode.get("mode", "cpu")
-            params = execution_mode.get("execParams", {})
-        elif isinstance(execution_mode, ComputeHelpersCPU):
-            mode = "custom"
-            self.compute_helpers = execution_mode
+        self.compute_helpers = self.setExecutionMode(execution_mode, **kwargs)
+        if self.showPlots:
+            self.plot_helper = PlotHelper()
         else:
-            mode = execution_mode
-            params = kwargs
+            self.plot_helper = None
             
-        if mode.lower() == "gpu":
-            pass
-            from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
-            self.compute_helpers = ComputeHelpersGPU(**params)
-        elif mode.lower() == "cpu":
-            self.compute_helpers = ComputeHelpersCPU(**params)
-        elif mode!= "custom":
-            raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
         
         if cacheStoragePath == "":
             self.cache_path = os.path.join(os.getcwd(), 'cache')
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
-            
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
-            self.compute_helpers = ComputeHelpersCPU(memory_location=self.cache_path)
             self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
+        self.compute_helpers.setMem(memory_locatoin=self.cache_path)
+
             
             
     def add_dataset(self, label: str, folder: str):
@@ -815,8 +796,26 @@ class Ana:
         self.cache_path = os.path.join(os.getcwd(), path)
         os.makedirs(self.cache_path, exist_ok=True)
     
-    def setExecutionMode(self, execMode: str):
-        self.execution_mode = execMode
+    def setExecutionMode(self, execution_mode, **kwargs):
+        from CompHelperCPU import ComputeHelpersCPU
+        
+        if isinstance(execution_mode, dict):
+            mode = execution_mode.get("mode", "cpu")
+            params = execution_mode.get("execParams", {})
+        elif isinstance(execution_mode, ComputeHelpersCPU):
+            mode = "custom"
+            self.compute_helpers = execution_mode
+        else:
+            mode = execution_mode
+            params = kwargs
+            
+        if mode.lower() == "gpu" or mode.lower() == "cuda":
+            from AnalysisTools.CompHelperGPU import ComputeHelpersGPU
+            self.compute_helpers = ComputeHelpersGPU(**params)
+        elif mode.lower() == "cpu":
+            self.compute_helpers = ComputeHelpersCPU(**params)
+        elif mode!= "custom":
+            raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
     
     def setShowPlots(self, show: bool):
         self.showPlots = show
