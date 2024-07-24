@@ -291,9 +291,10 @@ class PlotHelper:
         
     def _clustering_plot(self, data, params):
         X, labels, additional_info = data
-        cluster_labels, _ = self.compute_helpers.evaluate_clustering(X)
         n_clusters = len(np.unique(labels))
         plot_type = params['plot_type']
+        
+        labels, _ = self.compute_helpers.evaluate_clustering(X, labels)
 
         fig = plt.figure(figsize=(20, 15))
         gs = fig.add_gridspec(3, 3)
@@ -336,17 +337,20 @@ class PlotHelper:
         # Method-specific plots
         if plot_type == 'kmeans':
             ax5 = fig.add_subplot(gs[2, 1])
-
-            ax5.plot(range(1, len(additional_info['inertia']) + 1), additional_info['inertia'], 'bo-')
-            ax5.set_title('Inertia vs. Number of Clusters')
-            ax5.set_xlabel('Number of Clusters')
-            ax5.set_ylabel('Inertia')
+            inertias = params.get('inertias', [])  # Get list of inertias for different k
+            if inertias:
+                ax5.plot(range(1, len(inertias) + 1), inertias)
+                ax5.set_title('Elbow Method')
+                ax5.set_xlabel('Number of Clusters (k)')
+                ax5.set_ylabel('Inertia')
+            else:
+                ax5.text(0.5, 0.5, 'Inertia data not available', ha='center', va='center')
 
         elif plot_type == 'spectral':
             ax5 = fig.add_subplot(gs[2, 1])
 
             affinity_matrix = params.get('affinity_matrix_')
-            ax5.imshow(affinity_matrix, cmap='viridis')
+            ax5.imshow(affinity_matrix, cmap=params.get('cmap'))
             ax5.set_title('Affinity Matrix')
             ax5.set_xlabel('Sample Index')
             ax5.set_ylabel('Sample Index')
@@ -501,6 +505,17 @@ class PlotHelper:
 
         Returns:
             None
+        """
+        return self._clustering_plot(data, params)
+    
+    def _kmeansclusteringplot(self, data, params):
+        """_kmeansclusteringplot 
+
+        Create a comprehensive spectral clustering plot.
+
+        Args:
+            data (np.array): The original data.
+            params (dict): Plotting parameters.
         """
         return self._clustering_plot(data, params)
         

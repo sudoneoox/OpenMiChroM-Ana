@@ -501,7 +501,7 @@ class ComputeHelpersCPU:
     
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, n_components, n_clusters, **kwargs):
+    def run_clustering(self, method, X, n_components:int = 0, n_clusters: int = 2, **kwargs):
         """
         Run the specified clustering method.
 
@@ -533,10 +533,15 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Cluster labels.
         """
-        kmeans = KMeans(n_clusters=n_clusters, n_jobs=self.n_jobs, **kwargs)
-        labels = kmeans.fit_predict(X, n_clusters=n_clusters, n_components=n_components)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, **kwargs)
+        labels = kmeans.fit_predict(X)
+        inertias = []
+        for k in range(1, n_clusters):
+            kmeans = KMeans(n_clusters=k, random_state=42)
+            kmeans.fit(X)
+            inertias.append(kmeans.inertia_)
         return labels, {
-            'inertia': kmeans.inertia_,
+            'inertia': inertias,
             'cluster_centers': kmeans.cluster_centers_,
             'n_iter': kmeans.n_iter_
         }
@@ -632,9 +637,9 @@ class ComputeHelpersCPU:
         }
 
 
-    def evaluate_clustering(self, data, n_clusters=5):
+    def evaluate_clustering(self, data, cluster_labels):
         """
-        Evaluate clustering quality using various metrics on GPU.
+        Evaluate clustering quality using various metrics on CPU.
 
         Args:
             data (cp.array): Input data used for clustering.
@@ -643,8 +648,7 @@ class ComputeHelpersCPU:
         Returns:
             cluster_labels, array: [Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index].
         """
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        cluster_labels = kmeans.fit_predict(data)
+
         
         silhouette = silhouette_score(data, cluster_labels)
         calinski_harabasz = calinski_harabasz_score(data, cluster_labels)

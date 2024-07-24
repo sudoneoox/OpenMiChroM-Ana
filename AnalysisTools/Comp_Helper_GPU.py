@@ -1,14 +1,13 @@
-import numpy as np
 import cupy as cp
+import numpy as np
 from numba import cuda
-from sklearn.base import BaseEstimator, TransformerMixin
-from cupyx.scipy.spatial.distance import pdist
-from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN
+from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN, SpectralClustering
 from cuml.metrics import silhouette_score, silhouette_samples
-from cuml.cluster import SpectralClustering
 from cuml.manifold import MDS
 from cupyx.scipy.sparse import csr_matrix
+from cupyx.scipy.spatial.distance import pdist
 import cudf
+from kneed import KneeLocator
 
 class ComputeHelpersGPU:
     """
@@ -17,7 +16,8 @@ class ComputeHelpersGPU:
     """
 
     def __init__(self, memory_location: str = '.', memory_verbosity: int = 0):
-        """
+        """__init__
+        
         Initialize the ComputeHelpersGPU class.
 
         Args:
@@ -35,7 +35,9 @@ class ComputeHelpersGPU:
         self.clustering_methods = {
             'dbscan': self._dbscan_clustering,
             'spectral': self._spectral_clustering,
-            'kmeans': self._kmeans_clustering
+            'kmeans': self._kmeans_clustering,
+            'hierarchical': self._hierarchical_clustering,
+            'optics': self._optics_clustering
         }
         
         self.distance_metrics = {
@@ -154,6 +156,7 @@ class ComputeHelpersGPU:
             return self.distance_metrics[metric](X)
         except KeyError:
             raise KeyError(f"Invalid metric: {metric}. Available metrics are: {list(self.distance_metrics.keys())}")
+
 
     def euclidean_distance(self, x):
         """Calculate the Euclidean distance matrix on GPU."""
@@ -294,7 +297,7 @@ class ComputeHelpersGPU:
             tuple: Reduced data and additional information (if available).
         """
         try:
-            return self.reduction_methods[method](X, n_components)
+            return self.reduction_methods[method](X, n_components, **kwargs)
         except KeyError:
             raise KeyError(f"Invalid reduction method: {method}. Available methods are: {list(self.reduction_methods.keys())}")
 
@@ -302,13 +305,18 @@ class ComputeHelpersGPU:
         """Perform PCA reduction on GPU."""
         pca = PCA(n_components=n_components)
         result = pca.fit_transform(X)
+        feature_importance = cp.abs(pca.components_[0])
+        sorted_idx = cp.argsort(feature_importance)
+        print("Feature Importance: ")
+        for idx in sorted_idx[-10:]: # print top 10 features
+            print(f"Feature {idx}: {feature_importance[idx]:.4f}")
         return result, pca.explained_variance_ratio_, pca.components_
 
     def _svd_reduction(self, X, n_components):
         """Perform SVD reduction on GPU."""
         svd = TruncatedSVD(n_components=n_components)
         result = svd.fit_transform(X)
-        return result
+        return result, svd.singular_values_, svd.components_
 
     def _tsne_reduction(self, X, n_components):
         """Perform t-SNE reduction on GPU."""
@@ -330,7 +338,7 @@ class ComputeHelpersGPU:
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, **kwargs):
+    def run_clustering(self, method, X, n_components: int, n_clusters: int, **kwargs):
         """
         Run the specified clustering method on GPU.
 
@@ -343,24 +351,71 @@ class ComputeHelpersGPU:
             cp.array: Cluster labels.
         """
         try:
-            return self.clustering_methods[method](X, **kwargs)
+            return self.clustering_methods[method](X, n_clusters=n_clusters, n_components=n_components, **kwargs)
         except KeyError:
             raise KeyError(f"Invalid clustering method: {method}. Available methods are: {list(self.clustering_methods.keys())}")
 
     def _kmeans_clustering(self, X: cp.array, n_clusters: int, **kwargs):
         """Perform K-means clustering on GPU."""
         kmeans = KMeans(n_clusters=n_clusters, **kwargs)
-        return kmeans.fit_predict(X)
-
+        labels = kmeans.fit_predict(X)
+        inertias = []
+        for k in range(1, n_clusters):
+            kmeans_temp = KMeans(n_clusters=k)
+            kmeans_temp.fit(X)
+            inertias.append(kmeans_temp.inertia_)
+        return labels, {
+            'inertia': inertias,
+            'cluster_centers': kmeans.cluster_centers_,
+            'n_iter': kmeans.n_iter_
+        }
+        
     def _spectral_clustering(self, X, n_clusters, **kwargs):
         """Perform Spectral clustering on GPU."""
-        sc = SpectralClustering(n_clusters=n_clusters, **kwargs)
-        return sc.fit_predict(X)
+        spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components, **kwargs)
+        labels = spectral.fit_predict(X)
+        return labels, {
+            'affinity_matrix_': spectral.affinity_matrix_,
+            'n_features_in': spectral.n_features_in_
+        }
+
 
     def _dbscan_clustering(self, X, eps, min_samples, **kwargs):
         """Perform DBSCAN clustering on GPU."""
         dbscan = DBSCAN(eps=eps, min_samples=min_samples, **kwargs)
-        return dbscan.fit_predict(X)
+        labels = dbscan.fit_predict(X)
+        return labels, {
+            'core_sample_indices': dbscan.core_sample_indices_,
+            'components': dbscan.components_,
+            'n_features_in': dbscan.n_features_in_
+        }
+        
+    def _hierarchical_clustering(self, X, n_clusters, **kwargs):
+        # Note: Hierarchical clustering is not available in cuML. 
+        # We'll need to move data to CPU, perform clustering, and move back to GPU.
+        from scipy.cluster.hierarchy import linkage, fcluster
+        X_cpu = cp.asnumpy(X)
+        linkage_matrix = linkage(X_cpu, method=kwargs.get('method', 'ward'))
+        labels = fcluster(linkage_matrix, t=n_clusters, criterion='maxclust')
+        return cp.array(labels), {
+            'linkage_matrix': cp.array(linkage_matrix)
+        }
+        
+    
+    def _optics_clustering(self, X, min_samples, xi, min_cluster_size, **kwargs):
+        # Note: OPTICS is not available in cuML. 
+        # We'll need to move data to CPU, perform clustering, and move back to GPU.
+        from sklearn.cluster import OPTICS
+        X_cpu = cp.asnumpy(X)
+        optics = OPTICS(min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
+        labels = optics.fit_predict(X_cpu)
+        return cp.array(labels), {
+            'reachability': cp.array(optics.reachability_),
+            'ordering': cp.array(optics.ordering_),
+            'core_distances': cp.array(optics.core_distances_),
+            'predecessor': cp.array(optics.predecessor_)
+        }
+
 
     def find_optimal_clusters(self, data: cp.array, max_clusters: int=10):
         """
@@ -392,7 +447,7 @@ class ComputeHelpersGPU:
         # Return the smaller of the two to be conservative
         return min(elbow, silhouette_optimal)
 
-    def evaluate_clustering(self, data, n_clusters=5):
+    def evaluate_clustering(self, data, cluster_labels):
         """
         Evaluate clustering quality using various metrics on GPU.
 
@@ -403,18 +458,19 @@ class ComputeHelpersGPU:
         Returns:
             tuple: Silhouette score, Calinski-Harabasz index, and Davies-Bouldin index.
         """
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        cluster_labels = kmeans.fit_predict(data)
-        
+        from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+
         silhouette = silhouette_score(data, cluster_labels)
         calinski_harabasz = calinski_harabasz_score(data, cluster_labels)
         davies_bouldin = davies_bouldin_score(data, cluster_labels)
+
+        score_list = [silhouette, calinski_harabasz, davies_bouldin]
         print("\nClustering Evaluation Metrics:")
         print(f" Silhouette Score: {silhouette:.4f} (higher is better, range: [-1, 1])")
         print(f" Calinski-Harabasz Index: {calinski_harabasz:.4f} (higher is better)")
         print(f" Davies-Bouldin Index: {davies_bouldin:.4f} (lower is better)")
         
-        return cluster_labels
+        return cluster_labels, score_list
     """==================================================================== UTILITY METHODS =========================================================="""
 
     def _calc_dist_wrapper(self, trajectories, metric):
@@ -429,7 +485,7 @@ class ComputeHelpersGPU:
             list: List of distance matrices.
         """
         return [self.calc_dist(cp.array(val), metric) for val in trajectories]
-
+    
     def cached_calc_dist(self, trajectories, metric):
         """
         Calculates distance matrices on GPU (caching not implemented for GPU version).
@@ -465,6 +521,7 @@ class ComputeHelpersGPU:
     
     def setMem(self, path: str, verbose: int = 0):
         """Set memory location and verbosity (not applicable for GPU version)."""
+        print('called setMem for CompHelpersGPU: No-op for GPU Version.')
         pass  # No-op for GPU version
 
     """==================================================================== GPU-SPECIFIC UTILITY METHODS =========================================================="""
@@ -507,6 +564,7 @@ class ComputeHelpersGPU:
         pinned_mempool = cp.get_default_pinned_memory_pool()
         mempool.free_all_blocks()
         pinned_mempool.free_all_blocks()
+
         
     """================================================== OTHER UTILS ==================================================================="""
     def squareform(distances):

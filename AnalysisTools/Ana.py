@@ -1,6 +1,7 @@
 from AnalysisTools.Plot_Helper import PlotHelper
 from OpenMiChroM.CndbTools import cndbTools
 from AnalysisTools.Comp_Helper_CPU import ComputeHelpersCPU
+from AnalysisTools.Comp_Helper_GPU import ComputeHelpersGPU
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import resample
@@ -500,7 +501,7 @@ class Ana:
         if n_clusters == -1:
             n_clusters = self.compute_helpers.find_optimal_clusters(X, 20)
             print(f'found optimal clusters: {n_clusters}')
-        
+                
         cluster_result, additional_info = self.compute_helpers.run_clustering('spectral', X, n_clusters=n_clusters, n_components=n_components, **spectralParams or {})
         affinity_matrix = additional_info["affinity_matrix_"]
         if self.showPlots:
@@ -518,7 +519,7 @@ class Ana:
         return cluster_result, additional_info
     
     
-    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice',**kwargs) -> tuple:
         """
         Performs K-means clustering on the datasets.
 
@@ -540,15 +541,18 @@ class Ana:
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
+        if n_clusters == -1:
+            n_clusters = self.compute_helpers.find_optimal_clusters(X, 20)
         
         kmeans_result, additional_info = self.compute_helpers.run_clustering('kmeans', X, n_clusters=n_clusters, **kwargs)
-        
+        inertia = additional_info['inertia']
         if self.showPlots:
-            self.plot_helper.plot(plot_type="clustering", data=[X, kmeans_result, additional_info], plot_params={
+            self.plot_helper.plot(plot_type="kmeansclusteringplot", data=[X, kmeans_result, additional_info], plot_params={
                 'outputFileName': os.path.join(kmeansPath, f'kmeans_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
                 'plot_type': 'kmeans',
                 'cmap':'viridis',
                 'title': f'KMeans Clustering of {args}',
+                'inertia':inertia,
                 'method': method,
                 'metric': metric,
                 'norm': norm,

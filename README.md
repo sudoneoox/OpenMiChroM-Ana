@@ -35,7 +35,7 @@ The GPU version requires CUDA and the RAPIDS suite of libraries. Follow these st
 - create new conda or venv environment
 
 ```bash
-conda create -n [envName] python=3.10
+conda create -n [envName] python=3.11
 conda activate [envName]
 ```
 
