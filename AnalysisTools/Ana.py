@@ -242,6 +242,7 @@ class Ana:
         
         
         pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components)
+        labels = np.repeat(np.arange(len(args)), [len(self.datasets[arg]['trajectories']) for arg in args]) #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
         
         cumulative_variance = np.cumsum(explained_variance_ratio)
         
@@ -253,6 +254,7 @@ class Ana:
             plot_params = {
                 'outputFileName': f"{pcaPath}/pca_plot_{args}_{method}_{metric}_{norm}.png",
                 'plot_type': 'pcaplot',
+                'labels': labels, #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
                 'cmap': 'viridis',
                 'title': f'PCA of {args}',
                 'x_label': 'PC1',
@@ -695,6 +697,16 @@ class Ana:
         Returns:
             tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
         """
+        if self.execution_mode.lower() == 'cuda':
+            return self.compute_helpers.calc_XZ(
+                datasets=self.datasets,
+                args=args,
+                cache_path=self.cache_path,
+                method=method,
+                metric=metric,
+                norm=norm,
+                overrideCache=overrideCache
+            )
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         

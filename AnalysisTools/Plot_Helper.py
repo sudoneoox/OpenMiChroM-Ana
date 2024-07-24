@@ -183,9 +183,14 @@ class PlotHelper:
         result, additional_info, _ = data
         n_components = params.get('n_components', 2)
         plot_type = params.get("plot_type")
+        labels = params.get('labels')
+        
+        if labels is None:
+            kmeans = KMeans(n_clusters=params.get('n_clusters', 5), random_state=42)
+            labels = kmeans.fit_predict(result)
 
         # Perform clustering and evaluation
-        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result, n_clusters=params.get('n_clusters', 5))
+        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result,labels)
         
         fig = plt.figure(figsize=params['figsize'])
         

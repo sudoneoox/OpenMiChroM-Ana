@@ -9,6 +9,10 @@ from cupyx.scipy.spatial.distance import pdist
 import cudf
 from kneed import KneeLocator
 
+FILE_EXTENSION_MAP = {"ptx": "ptx"}
+import numba.cuda
+FILE_EXTENSION_MAP = numba.cuda.FILE_EXTENSION_MAP
+
 class ComputeHelpersGPU:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis,
@@ -576,3 +580,91 @@ class ComputeHelpersGPU:
     
     def safe_divide(self, a, b):
         return cp.divide(a, b, out=cp.zeros_like(a), where=b!=0)
+    
+
+
+    def calc_XZ(self, datasets, args, cache_path, method='weighted', metric='euclidean', norm='ice', overrideCache=False):
+        from cupyx.scipy.cluster.hierarchy import linkage as cp_linkage
+        import os
+        key = tuple(sorted(args)) + (method, metric, norm)
+        cache_file = os.path.join(cache_path, f"cache_{key}.pkl")
+        
+        if not overrideCache:
+            try:
+                cached_data = cp.load(cache_file + ".npz", allow_pickle=True)
+                print(f"Using cached data: {cache_file}.npz")
+                return cached_data['X'], cached_data['Z']
+            except FileNotFoundError:
+                print(f"No cached data, creating cache file {cache_file}")
+        else:
+            print("Overriding cache, recomputing results")
+        
+        flat_euclid_dist_map = {}
+        max_shape = (0, 0)
+        
+        for label in args:
+            print(f'Processing {label}')
+            trajectories = datasets[label]['trajectories']
+            if trajectories is None or len(trajectories) == 0:
+                print(f"Trajectories not yet loaded for {label}. Load them first")
+                return cp.array([]), cp.array([])
+            
+            dist = self.cached_calc_dist(trajectories, metric=metric)
+            dist = cp.array(dist)
+            print(f"{label} has dist shape {dist.shape}")
+            
+            # Handle infinite values
+            inf_mask = cp.isinf(dist)
+            if cp.any(inf_mask):
+                print(f"Warning: Infinite values found in distance matrix for {label}. Replacing with large finite value.")
+                large_finite = cp.finfo(dist.dtype).max / 2
+                dist[inf_mask] = large_finite
+            
+            # Handle NaN values (likely centromere regions)
+            nan_mask = cp.isnan(dist)
+            if cp.any(nan_mask):
+                print(f"Warning: NaN values found in distance matrix for {label}. These are likely centromere regions.")
+                dist[nan_mask] = cp.nanmean(dist)
+            
+            normalized_dist = cp.array([self.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
+            flat_euclid_dist_map[label] = normalized_dist
+            
+            max_shape = cp.maximum(max_shape, cp.max([d.shape for d in normalized_dist], axis=0))
+        
+        # Pad arrays to ensure consistent shapes
+        padded_flat_euclid_dist_map = {
+            label: [cp.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) 
+                    for val in sublist] 
+            for label, sublist in flat_euclid_dist_map.items()
+        }
+        
+        # Flatten and stack distance matrices
+        flat_euclid_dist_map = {
+            label: [padded_flat_euclid_dist_map[label][val][cp.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
+                    for val in range(len(padded_flat_euclid_dist_map[label]))]
+            for label in args
+        }
+        
+        X = cp.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
+        print(f"Flattened distance array has shape: {X.shape}")
+        
+        # Final check for non-finite values
+        non_finite_mask = ~cp.isfinite(X)
+        if cp.any(non_finite_mask):
+            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+            X[non_finite_mask] = cp.nanmean(X)
+            
+        # Perform linkage
+        try:
+            Z = cp_linkage(X, method=method, metric='euclidean')
+        except ValueError as e:
+            print(f"Error in linkage: {e}")
+            print("Attempting to proceed with available finite values...")
+            finite_mask = cp.isfinite(X)
+            X_finite = X[finite_mask]
+            Z = cp_linkage(X_finite, method=method, metric='euclidean')
+        
+        # Cache the results
+        if not overrideCache:
+            cp.savez_compressed(cache_file, X=X, Z=Z)
+        return X, Z
