@@ -33,11 +33,11 @@ Note: GPU support requires a CUDA-enabled GPU and appropriate CUDA toolkit insta
 
 from .CompHelperCPU import ComputeHelpersCPU
 
-try:
-    from .CompHelperGPU import ComputeHelpersGPU
-except ImportError:
-    print("GPU support not available. Using CPU only.")
-    ComputeHelpersGPU = None
+# try:
+#     from .CompHelperGPU import ComputeHelpersGPU
+# except ImportError:
+#     print("GPU support not available. Using CPU only.")
+#     ComputeHelpersGPU = None
 
 from .PlotHelper import PlotHelper
 from .Ana import Ana 

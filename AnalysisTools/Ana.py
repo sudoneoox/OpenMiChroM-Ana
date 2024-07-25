@@ -58,8 +58,8 @@ class Ana:
         else:
             self.cache_path = os.path.join(os.getcwd(), cacheStoragePath)
             os.makedirs(self.cache_path, exist_ok=True)
-            self.plot_helper.setMeMForComputeHelpers(cacheStoragePath)
-        self.compute_helpers.setMem(memory_locatoin=self.cache_path)
+            self.plot_helper.setMeMForComputeHelpers(memory_location=cacheStoragePath)
+        self.compute_helpers.setMem(memory_location=self.cache_path)
 
             
             
@@ -797,7 +797,7 @@ class Ana:
         os.makedirs(self.cache_path, exist_ok=True)
     
     def setExecutionMode(self, execution_mode, **kwargs):
-        from CompHelperCPU import ComputeHelpersCPU
+        from AnalysisTools.CompHelperCPU import ComputeHelpersCPU
         
         if isinstance(execution_mode, dict):
             mode = execution_mode.get("mode", "cpu")
@@ -816,6 +816,8 @@ class Ana:
             self.compute_helpers = ComputeHelpersCPU(**params)
         elif mode!= "custom":
             raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
+        
+        return self.compute_helpers
     
     def setShowPlots(self, show: bool):
         self.showPlots = show

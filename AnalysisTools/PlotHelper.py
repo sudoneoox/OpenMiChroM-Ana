@@ -50,7 +50,7 @@ class PlotHelper:
         
         self.cacheStorage = os.path.join(os.getcwd(), cacheStorage)
         self.compute_helpers = ComputeHelpersCPU()
-        self.compute_helpers.setMem(path=self.cacheStorage)
+        self.compute_helpers.setMem(memory_location=self.cacheStorage)
         
         if AnalysisStorage == '':
             self.AnalysisStorage = os.path.join(os.getcwd(), 'Analysis')
@@ -552,5 +552,5 @@ class PlotHelper:
             self.default_params[key] = params[key]
         print(f'the updated initial plot parameters are: {self.default_params}')
         
-    def setMeMForComputeHelpers(self, path: str):
-        self.compute_helpers.setMem(path=path)
+    def setMeMForComputeHelpers(self, memory_location: str):
+        self.compute_helpers.setMem(memory_location=memory_location)

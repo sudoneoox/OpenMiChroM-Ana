@@ -757,9 +757,9 @@ class ComputeHelpersCPU:
         """Get memory statistics."""
         return self.memory.location
     
-    def setMem(self, path: str, verbose: int = 0):
+    def setMem(self, memory_location: str, verbose: int = 0):
         """Set memory location and verbosity."""
-        self.memory = Memory(location=path, verbose=verbose)
+        self.memory = Memory(location=memory_location, verbose=verbose)
     
     def safe_divide(self, a, b):
         """Safely divide two ararays, returning 0 where division by zero would occur"""
