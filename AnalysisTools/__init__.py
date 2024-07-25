@@ -41,7 +41,6 @@ from .CompHelperCPU import ComputeHelpersCPU
 
 from .PlotHelper import PlotHelper
 from .Ana import Ana 
-from .cndbToolsMini import cndbToolsMini
 
 
-__all__ = ['Ana', 'ComputeHelpersCPU', 'ComputeHelpersGPU', 'PlotHelper', 'cndbToolsMini']
+__all__ = ['Ana', 'ComputeHelpersCPU', 'ComputeHelpersGPU', 'PlotHelper']

@@ -183,48 +183,104 @@ class PlotHelper:
         result, additional_info, _ = data
         n_components = params.get('n_components', 2)
         plot_type = params.get("plot_type")
-        labels = params.get('labels')
+        labels = params.get('labels', [])
+        n_clusters = params.get('n_clusters', 2)
+
+        fig = plt.figure(figsize=params['figsize'])
+
+        # Use a fixed colormap for the clusters
+        cmap = plt.cm.get_cmap('Set1')
+        colors = [cmap(i) for i in range(n_clusters)]
+
         
-        if labels is None:
-            kmeans = KMeans(n_clusters=params.get('n_clusters', 5), random_state=42)
-            labels = kmeans.fit_predict(result)
+        kmeans = KMeans(n_clusters=params.get('n_clusters'), random_state=42)
+        cluster_labels = kmeans.fit_predict(result)
 
         # Perform clustering and evaluation
-        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result,labels)
+        _, evaluation_metrics = self.compute_helpers.evaluate_clustering(result, cluster_labels)
         
         fig = plt.figure(figsize=params['figsize'])
         
         if n_components == 1:
             ax = fig.add_subplot(111)
             scatter = ax.scatter(range(len(result)), result[:, 0],
-                                c=range(len(result)),
+                                c=cluster_labels,
                                 alpha=params['alpha'],
                                 s=params['size'],
-                                cmap=params['cmap'])
-            ax.set_xlabel('Sample Index')
+                                cmap='Set1')  # Use a discrete colormap
+            ax.set_xlabel('Index')
             ax.set_ylabel(params['y_label'])
         elif n_components == 2:
             ax = fig.add_subplot(111)
             scatter = ax.scatter(result[:, 0], result[:, 1],
                                 c=range(len(result)),
+                                cmap='Set1',
                                 alpha=params['alpha'],
-                                s=params['size'],
-                                cmap=params['cmap'])
+                                s=params['size'])
             ax.set_xlabel(params['x_label'])
             ax.set_ylabel(params['y_label'])
         elif n_components == 3:
             ax = fig.add_subplot(111, projection='3d')
             scatter = ax.scatter(result[:, 0], result[:, 1], result[:, 2],
-                                c=range(len(result)),
+                                c=cluster_labels,
                                 alpha=params['alpha'],
                                 s=params['size'],
-                                cmap=params['cmap'])
+                                cmap='Set1')  # Use a discrete colormap
             ax.set_xlabel(params['x_label'])
             ax.set_ylabel(params['y_label'])
             ax.set_zlabel(params['z_label'])
 
         plt.title(params['title'])
-        plt.colorbar(scatter, label='Sample Index')
+        
+        # Add legend for clusters
+        legend_elements = [plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {i+1}',
+                                    markerfacecolor=scatter.cmap(scatter.norm(i)), markersize=10)
+                        for i in range(params.get('n_clusters'))]
+        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
+
+        # Add element labels
+        if len(labels) == n_clusters:
+            for i, label in enumerate(params['labels']):
+                if n_components == 1:
+                    ax.annotate(label, (i, result[i, 0]))
+                elif n_components == 2:
+                    ax.annotate(label, (result[i, 0], result[i, 1]))
+                elif n_components == 3:
+                    ax.text(result[i, 0], result[i, 1], result[i, 2], label)
+        
+        
+        # Prepare additional info text
+        additional_info_text = ""
+        if plot_type == 'pcaplot':
+            if isinstance(additional_info, np.ndarray) and additional_info.size == n_components:
+                additional_info_text = "Explained variance:\n" + "\n".join([f"PC{i+1}: {var:.2%}" for i, var in enumerate(additional_info)])
+        elif plot_type == 'tsneplot':
+            if isinstance(additional_info, float):
+                additional_info_text = f"KL divergence: {additional_info:.4f}"
+        elif plot_type == 'umapplot':
+            if isinstance(params.get('embedding'), np.ndarray):
+                embedding = params.get('embedding')
+                singular_values = embedding.flatten()[:5]
+                additional_info_text = "UMAP Embedding:\n" + "\n".join([f"{val:.2f}" for val in singular_values])
+        elif plot_type == 'svdplot':
+            if isinstance(additional_info, np.ndarray):
+                additional_info_text = "Top singular values:\n" + "\n".join([f"{val:.2f}" for val in additional_info[:5]])
+        elif plot_type == 'mdsplot':
+            if isinstance(additional_info, float):
+                additional_info_text = f"Stress: {additional_info:.4f}"
+        
+        # Add n_components_95 information if available
+        n_components_95 = params.get('n_components_95')
+        if n_components_95 is not None:
+            additional_info_text += f"\n\nComponents for 95% variance: {n_components_95}"
+        
+        # Add additional info text to the right side of the plot
+        # plt.text(1.05, 0.5, additional_info_text, transform=ax.transAxes, verticalalignment='center')
+        print(additional_info)
+        ax.set_xticks([])
+
+        print(f"Dimensionality reduction plot created with {n_components} components")
+        self._save_and_show(params)
         
         # Prepare logging information
         log_info = f"""
@@ -240,59 +296,20 @@ class PlotHelper:
             - norm: {params.get('norm')}
 
             Results:
+            Clustering Metrics:
+            - Silhouette Score: {evaluation_metrics[0]:.4f} (higher is better, range: [-1, 1])
+            - Calinski-Harabasz Index: {evaluation_metrics[1]:.4f} (higher is better)
+            - Davies-Bouldin Index: {evaluation_metrics[2]:.4f} (lower is better)
+
+            {'='*50}
             """
-
         
-    # Handle additional info based on the reduction method
-        if plot_type == 'pcaplot':
-            if isinstance(additional_info, np.ndarray) and additional_info.size == n_components:
-                variance_text = "Explained variance: " + ", ".join([f"PC{i+1} {var:.2%}" for i, var in enumerate(additional_info)])
-                plt.text(0.05, 0.95, variance_text, transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'tsneplot':
-            if isinstance(additional_info, float):
-                plt.text(0.05, 0.95, f"KL divergence: {additional_info:.4f}", transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'umapplot':
-            if isinstance(params.get('embedding'), np.ndarray):
-                embedding = params.get('embedding')
-                singular_values = embedding.flatten()[:5]  # Flatten to get a 1D array if embedding is 2D
-                singular_values_text = "UMAP Embedding: " + ", ".join([f"{val:.2f}" for val in singular_values])
-                plt.text(0.05, 0.95, singular_values_text, transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'svdplot':
-            if isinstance(additional_info, np.ndarray):
-                singular_values_text = "Top singular values: " + ", ".join([f"{val:.2f}" for val in additional_info[:5]])
-                plt.text(0.05, 0.95, singular_values_text, transform=ax.transAxes, verticalalignment='top')
-        elif plot_type == 'mdsplot':
-            if isinstance(additional_info, float):
-                plt.text(0.05, 0.95, f"Stress: {additional_info:.4f}", transform=ax.transAxes, verticalalignment='top')
-        else:
-            if isinstance(additional_info, float):
-                plt.text(0.05, 0.95, f"Additional info: {additional_info:.4f}", transform=ax.transAxes, verticalalignment='top')
-        
-        # Add n_components_95 information if available
-        n_components_95 = params.get('n_components_95')
-        if n_components_95 is not None:
-            plt.text(0.05, 0.90, f"Components for 95% variance: {n_components_95}", transform=ax.transAxes, verticalalignment='top')
-        
-        print(f"Dimensionality reduction plot created with {n_components} components")
-        self._save_and_show(params)
-        
-    # Add clustering metrics
-        cluster_labels, _ = self.compute_helpers.evaluate_clustering(result, n_clusters=params.get('n_clusters'))
-        log_info += f"""
-        Clustering Metrics:
-        - Silhouette Score: {_[0]:.4f} (higher is better, range: [-1, 1])
-        - Calinski-Harabasz Index: {_[1]:.4f} (higher is better)
-        - Davies-Bouldin Index: {_[2]:.4f} (lower is better)
-
-        {'='*50}
-        """
-                # Write to log file
-        log_dir = os.path.dirname(params.get('outputFileName'))
-        log_path = os.path.join(log_dir, 'dimensionality_reduction_log.txt')
+        # Write to log file
+        log_path = params.get('logPath')
         with open(log_path, "a") as f:
             f.write(log_info)
 
-        print(log_info) 
+        print(log_info)
         
     def _clustering_plot(self, data, params):
         X, labels, additional_info = data

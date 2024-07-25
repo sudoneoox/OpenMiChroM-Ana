@@ -1,5 +1,5 @@
 from AnalysisTools.PlotHelper import PlotHelper
-from AnalysisTools.cndbToolsMini import cndbToolsMini as cndbTools
+from OpenMiChroM.CndbTools import cndbTools
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import resample
@@ -46,6 +46,7 @@ class Ana:
             os.makedirs(self.outPath, exist_ok=True)
             
         self.setExecutionMode(execution_mode, **kwargs)
+        
         if self.showPlots:
             self.plot_helper = PlotHelper()
         else:
@@ -198,7 +199,7 @@ class Ana:
 
         return self.datasets[label]['distance_array']
 
-    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 5) -> tuple:       
+    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 5, labels: list=[None]) -> tuple:       
         """
         Performs PCA on the datasets and returns the principal components and explained variance.
 
@@ -214,6 +215,7 @@ class Ana:
             tuple: (np.array, np.array, np.array) The principal components, the explained variance ratio, and the components.
         """
         pcaPath = os.path.join(self.outPath, 'PCA')
+        logPath = os.path.join(pcaPath, f"{args}_log.txt")
         os.makedirs(pcaPath, exist_ok=True)
                 
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
@@ -234,8 +236,9 @@ class Ana:
         if self.showPlots:
             plot_params = {
                 'outputFileName': f"{pcaPath}/pca_plot_{args}_{method}_{metric}_{norm}.png",
+                'logPath': logPath,
                 'plot_type': 'pcaplot',
-                'labels': labels, #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
+                'labels': labels if labels.all() != [None] else args,  # Use provided labels or dataset names                
                 'cmap': 'viridis',
                 'title': f'PCA of {args}',
                 'x_label': 'PC1',
@@ -249,6 +252,7 @@ class Ana:
                 'n_components_95': n_components_95,
                 'size': 50,
                 'alpha': 0.7,
+                'element_labels': labels
             }
 
             if n_components > 1:
@@ -329,6 +333,8 @@ class Ana:
             tuple: (np.array,) The UMAP results.
         """
         umapPath = os.path.join(self.outPath, 'UMAP')
+        logPath = os.path.join(umapPath, f"{args}_log.txt")
+
         os.makedirs(umapPath, exist_ok=True)
         if n_clusters == -1:
             n_clusters = self.compute_helpers.find_optimal_clusters(X, 15)
@@ -346,6 +352,7 @@ class Ana:
         if self.showPlots:
             self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params={
                 'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}_{norm}.png'),
+                'logPath': logPath,
                 'plot_type': 'umapplot',
                 'cmap': 'viridis',
                 'embedding': embedding,
@@ -665,101 +672,102 @@ class Ana:
 
 
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
-        distance_key = tuple(sorted(args)) + (method, metric)
-        distance_cache_file = os.path.join(self.cache_path, f"distance_cache_{distance_key}.npz")
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+        """
+        Calculate and cache the distance matrix and linkage matrix for given datasets.
+
+        Args:
+            *args (str): Labels of the datasets to process.
+            method (str): The linkage method to use.
+            metric (str): The distance metric to use.
+            norm (str): The normalization method to use.
+
+        Returns:
+            tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
+        """
+        key = tuple(sorted(args)) + (method, metric, norm)
+        cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         
-        norm_key = tuple(sorted(args)) + (method, metric, norm)
-        norm_cache_file = os.path.join(self.cache_path, f"norm_cache_{norm_key}.npz")
-        
-        if not overrideCache:
-            try:
-                norm_cached_data = np.load(norm_cache_file, allow_pickle=True)
-                print(f"Using normalized cached data: {norm_cache_file}")
-                return norm_cached_data['X'], norm_cached_data['Z']
-            except FileNotFoundError:
-                print(f"No normalized cached data, checking for distance cache")
+        # Try to load cached data
+        try:
+            cached_data = np.load(cache_file + ".npz", allow_pickle=True)
+            print(f"Using cached data: {cache_file}.npz")
+            return cached_data['X'], cached_data['Z']
+        except FileNotFoundError:
+            print(f"No cached data, creating cache file {cache_file}")
         
         flat_euclid_dist_map = {}
-        min_shape = None
+        max_shape = (0, 0)
         
-        if not overrideCache:
-            try:
-                distance_cached_data = np.load(distance_cache_file, allow_pickle=True)
-                print(f"Using distance cached data: {distance_cache_file}")
-                flat_euclid_dist_map = distance_cached_data['flat_euclid_dist_map'].item()
-                min_shape = tuple(distance_cached_data['min_shape'])
-            except FileNotFoundError:
-                print(f"No distance cached data, computing distances")
-        
-        if not flat_euclid_dist_map:
-            for label in args:
-                print(f'Processing {label}')
-                trajectories = self.datasets[label]['trajectories']
-                if trajectories is None or len(trajectories) == 0:
-                    print(f"Trajectories not yet loaded for {label}. Load them first")
-                    return np.array([]), np.array([])
-                
-                dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
-                dist = np.array(dist)
-                print(f"{label} has dist shape {dist.shape}")
-                
-                dist = np.nan_to_num(dist, nan=np.nanmean(dist), posinf=np.finfo(dist.dtype).max, neginf=np.finfo(dist.dtype).min)
-                
-                flat_euclid_dist_map[label] = dist
-                
-                if min_shape is None:
-                    min_shape = dist[0].shape
-                else:
-                    min_shape = np.minimum(min_shape, dist[0].shape)
+        for label in args:
+            print(f'Processing {label}')
+            trajectories = self.datasets[label]['trajectories']
+            if trajectories is None or len(trajectories) == 0:
+                print(f"Trajectories not yet loaded for {label}. Load them first")
+                return np.array([]), np.array([])
             
-            if not overrideCache:
-                np.savez_compressed(distance_cache_file, flat_euclid_dist_map=flat_euclid_dist_map, min_shape=min_shape)
+            dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
+            dist = np.array(dist)
+            print(f"{label} has dist shape {dist.shape}")
+            
+            # Handle infinite values
+            inf_mask = np.isinf(dist)
+            if np.any(inf_mask):
+                print(f"Warning: Infinite values found in distance matrix for {label}. Replacing with large finite value.")
+                large_finite = np.finfo(dist.dtype).max / 2
+                dist[inf_mask] = large_finite
+            
+            # Handle NaN values (likely centromere regions)
+            nan_mask = np.isnan(dist)
+            if np.any(nan_mask):
+                print(f"Warning: NaN values found in distance matrix for {label}. These are likely centromere regions.")
+                # Replace NaNs with the mean of non-NaN values
+                dist[nan_mask] = np.nanmean(dist)
+            
+            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
+            flat_euclid_dist_map[label] = normalized_dist
+            
+            max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
-        # Truncate arrays to ensure consistent shapes
-        truncated_flat_euclid_dist_map = {
-            label: [val[:min_shape[0], :min_shape[1]] for val in sublist] 
+        # Pad arrays to ensure consistent shapes
+        padded_flat_euclid_dist_map = {
+            label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) 
+                    for val in sublist] 
             for label, sublist in flat_euclid_dist_map.items()
         }
         
-        # Apply normalization
-        normalized_dist_map = {
-            label: [self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in sublist]
-            for label, sublist in truncated_flat_euclid_dist_map.items()
-        }
-        
         # Flatten and stack distance matrices
-        flat_normalized_dist_map = {
-            label: [matrix[np.triu_indices_from(matrix, k=1)].flatten()
-                    for matrix in sublist]
-            for label, sublist in normalized_dist_map.items()
+        flat_euclid_dist_map = {
+            label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
+                    for val in range(len(padded_flat_euclid_dist_map[label]))]
+            for label in args
         }
         
-        # Find the minimum length of flattened arrays
-        min_length = min(len(item) for sublist in flat_normalized_dist_map.values() for item in sublist)
-        
-        # Truncate all flattened arrays to the minimum length
-        flat_normalized_dist_map = {
-            label: [item[:min_length] for item in sublist]
-            for label, sublist in flat_normalized_dist_map.items()
-        }
-        
-        X = np.vstack([item for sublist in flat_normalized_dist_map.values() for item in sublist])
+        X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        X = np.nan_to_num(X, nan=np.nanmean(X), posinf=np.finfo(X.dtype).max, neginf=np.finfo(X.dtype).min)
-            
+        # Final check for non-finite values
+        non_finite_mask = ~np.isfinite(X)
+        if np.any(non_finite_mask):
+            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+            X[non_finite_mask] = np.nanmean(X)
+        
+        
+        # Perform linkage
         try:
             Z = linkage(X, method=method, metric='euclidean')
         except ValueError as e:
             print(f"Error in linkage: {e}")
             print("Attempting to proceed with available finite values...")
-            X_subset = X[:min(X.shape[0], 10000)]  # Limit to 10000 samples
-            Z = linkage(X_subset, method=method, metric='euclidean')
+            # Create a mask for finite values
+            finite_mask = np.isfinite(X)
+            X_finite = X[finite_mask]
+            Z = linkage(X_finite, method=method, metric='euclidean')
         
-        if not overrideCache:
-            np.savez_compressed(norm_cache_file, X=X, Z=Z)
+        # Cache the results
+        np.savez_compressed(cache_file, X=X, Z=Z)
         return X, Z
+    
     """ ============================================================= Getters/Setters ============================================================================================"""
 
     def getCachePath(self):
