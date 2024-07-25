@@ -45,7 +45,7 @@ class Ana:
             self.outPath = os.path.join(os.getcwd(), analysisStoragePath)
             os.makedirs(self.outPath, exist_ok=True)
             
-        self.compute_helpers = self.setExecutionMode(execution_mode, **kwargs)
+        self.setExecutionMode(execution_mode, **kwargs)
         if self.showPlots:
             self.plot_helper = PlotHelper()
         else:
@@ -666,114 +666,100 @@ class Ana:
 
 
     def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
-        """
-        Calculate and cache the distance matrix and linkage matrix for given datasets.
-
-        Args:
-            *args (str): Labels of the datasets to process.
-            method (str): The linkage method to use.
-            metric (str): The distance metric to use.
-            norm (str): The normalization method to use.
-            overrideCache (bool): If True, bypasses cache and recomputes the results.
-        Returns:
-            tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
-        """
-        if self.execution_mode.lower() == 'cuda':
-            return self.compute_helpers.calc_XZ(
-                datasets=self.datasets,
-                args=args,
-                cache_path=self.cache_path,
-                method=method,
-                metric=metric,
-                norm=norm,
-                overrideCache=overrideCache
-            )
-        key = tuple(sorted(args)) + (method, metric, norm)
-        cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
+        distance_key = tuple(sorted(args)) + (method, metric)
+        distance_cache_file = os.path.join(self.cache_path, f"distance_cache_{distance_key}.npz")
         
-        # Try to load cached data
+        norm_key = tuple(sorted(args)) + (method, metric, norm)
+        norm_cache_file = os.path.join(self.cache_path, f"norm_cache_{norm_key}.npz")
+        
         if not overrideCache:
             try:
-                cached_data = np.load(cache_file + ".npz", allow_pickle=True)
-                print(f"Using cached data: {cache_file}.npz")
-                return cached_data['X'], cached_data['Z']
+                norm_cached_data = np.load(norm_cache_file, allow_pickle=True)
+                print(f"Using normalized cached data: {norm_cache_file}")
+                return norm_cached_data['X'], norm_cached_data['Z']
             except FileNotFoundError:
-                print(f"No cached data, creating cache file {cache_file}")
-        else:
-            print("Overriding cache, recomputing results")
+                print(f"No normalized cached data, checking for distance cache")
         
         flat_euclid_dist_map = {}
-        max_shape = (0, 0)
+        min_shape = None
         
-        for label in args:
-            print(f'Processing {label}')
-            trajectories = self.datasets[label]['trajectories']
-            if trajectories is None or len(trajectories) == 0:
-                print(f"Trajectories not yet loaded for {label}. Load them first")
-                return np.array([]), np.array([])
-            
-            dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
-            dist = np.array(dist)
-            print(f"{label} has dist shape {dist.shape}")
-            
-            # Handle infinite values
-            inf_mask = np.isinf(dist)
-            if np.any(inf_mask):
-                print(f"Warning: Infinite values found in distance matrix for {label}. Replacing with large finite value.")
-                large_finite = np.finfo(dist.dtype).max / 2
-                dist[inf_mask] = large_finite
-            
-            # Handle NaN values (likely centromere regions)
-            nan_mask = np.isnan(dist)
-            if np.any(nan_mask):
-                print(f"Warning: NaN values found in distance matrix for {label}. These are likely centromere regions.")
-                # Replace NaNs with the mean of non-NaN values
-                dist[nan_mask] = np.nanmean(dist)
-            
-            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
-            flat_euclid_dist_map[label] = normalized_dist
-            
-            max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
+        if not overrideCache:
+            try:
+                distance_cached_data = np.load(distance_cache_file, allow_pickle=True)
+                print(f"Using distance cached data: {distance_cache_file}")
+                flat_euclid_dist_map = distance_cached_data['flat_euclid_dist_map'].item()
+                min_shape = tuple(distance_cached_data['min_shape'])
+            except FileNotFoundError:
+                print(f"No distance cached data, computing distances")
         
-        # Pad arrays to ensure consistent shapes
-        padded_flat_euclid_dist_map = {
-            label: [np.pad(val, ((0, max_shape[0] - val.shape[0]), (0, max_shape[1] - val.shape[1]))) 
-                    for val in sublist] 
+        if not flat_euclid_dist_map:
+            for label in args:
+                print(f'Processing {label}')
+                trajectories = self.datasets[label]['trajectories']
+                if trajectories is None or len(trajectories) == 0:
+                    print(f"Trajectories not yet loaded for {label}. Load them first")
+                    return np.array([]), np.array([])
+                
+                dist = self.compute_helpers.cached_calc_dist(trajectories, metric=metric)
+                dist = np.array(dist)
+                print(f"{label} has dist shape {dist.shape}")
+                
+                dist = np.nan_to_num(dist, nan=np.nanmean(dist), posinf=np.finfo(dist.dtype).max, neginf=np.finfo(dist.dtype).min)
+                
+                flat_euclid_dist_map[label] = dist
+                
+                if min_shape is None:
+                    min_shape = dist[0].shape
+                else:
+                    min_shape = np.minimum(min_shape, dist[0].shape)
+            
+            if not overrideCache:
+                np.savez_compressed(distance_cache_file, flat_euclid_dist_map=flat_euclid_dist_map, min_shape=min_shape)
+        
+        # Truncate arrays to ensure consistent shapes
+        truncated_flat_euclid_dist_map = {
+            label: [val[:min_shape[0], :min_shape[1]] for val in sublist] 
             for label, sublist in flat_euclid_dist_map.items()
         }
         
-        # Flatten and stack distance matrices
-        flat_euclid_dist_map = {
-            label: [padded_flat_euclid_dist_map[label][val][np.triu_indices_from(padded_flat_euclid_dist_map[label][val], k=1)].flatten()
-                    for val in range(len(padded_flat_euclid_dist_map[label]))]
-            for label in args
+        # Apply normalization
+        normalized_dist_map = {
+            label: [self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in sublist]
+            for label, sublist in truncated_flat_euclid_dist_map.items()
         }
         
-        X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
+        # Flatten and stack distance matrices
+        flat_normalized_dist_map = {
+            label: [matrix[np.triu_indices_from(matrix, k=1)].flatten()
+                    for matrix in sublist]
+            for label, sublist in normalized_dist_map.items()
+        }
+        
+        # Find the minimum length of flattened arrays
+        min_length = min(len(item) for sublist in flat_normalized_dist_map.values() for item in sublist)
+        
+        # Truncate all flattened arrays to the minimum length
+        flat_normalized_dist_map = {
+            label: [item[:min_length] for item in sublist]
+            for label, sublist in flat_normalized_dist_map.items()
+        }
+        
+        X = np.vstack([item for sublist in flat_normalized_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        # Final check for non-finite values
-        non_finite_mask = ~np.isfinite(X)
-        if np.any(non_finite_mask):
-            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
-            X[non_finite_mask] = np.nanmean(X)
+        X = np.nan_to_num(X, nan=np.nanmean(X), posinf=np.finfo(X.dtype).max, neginf=np.finfo(X.dtype).min)
             
-        # Perform linkage
         try:
             Z = linkage(X, method=method, metric='euclidean')
         except ValueError as e:
             print(f"Error in linkage: {e}")
             print("Attempting to proceed with available finite values...")
-            # Create a mask for finite values
-            finite_mask = np.isfinite(X)
-            X_finite = X[finite_mask]
-            Z = linkage(X_finite, method=method, metric='euclidean')
+            X_subset = X[:min(X.shape[0], 10000)]  # Limit to 10000 samples
+            Z = linkage(X_subset, method=method, metric='euclidean')
         
-        # Cache the results
         if not overrideCache:
-            np.savez_compressed(cache_file, X=X, Z=Z)
+            np.savez_compressed(norm_cache_file, X=X, Z=Z)
         return X, Z
-    
     """ ============================================================= Getters/Setters ============================================================================================"""
 
     def getCachePath(self):
@@ -805,6 +791,7 @@ class Ana:
         elif isinstance(execution_mode, ComputeHelpersCPU):
             mode = "custom"
             self.compute_helpers = execution_mode
+            self.execution_mode == 'cpu'
         else:
             mode = execution_mode
             params = kwargs
@@ -812,12 +799,13 @@ class Ana:
         if mode.lower() == "gpu" or mode.lower() == "cuda":
             from AnalysisTools.CompHelperGPU import ComputeHelpersGPU
             self.compute_helpers = ComputeHelpersGPU(**params)
+            self.execution_mode == 'gpu'
         elif mode.lower() == "cpu":
             self.compute_helpers = ComputeHelpersCPU(**params)
+            self.execution_mode == 'cpu'
         elif mode!= "custom":
             raise ValueError("Invalid execution mode. Use 'cpu', 'gpu', or pass a ComputeHelpers instance.")
         
-        return self.compute_helpers
     
     def setShowPlots(self, show: bool):
         self.showPlots = show
