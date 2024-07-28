@@ -1,18 +1,84 @@
 import cupy as cp
 import numpy as np
 from numba import cuda
-from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN, SpectralClustering
-from cuml.metrics import silhouette_score, silhouette_samples
-from cuml.manifold import MDS
+from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN
+from sklearn.metrics import silhouette_score
+# from cuml.manifold import MDS
 from cupyx.scipy.sparse import csr_matrix
 from cupyx.scipy.spatial.distance import pdist
 import cudf
 from kneed import KneeLocator
 
-FILE_EXTENSION_MAP = {"ptx": "ptx"}
-import numba.cuda
-FILE_EXTENSION_MAP = numba.cuda.FILE_EXTENSION_MAP
 
+@cuda.jit
+def _ice_normalization_kernel(matrix, bias, max_iter, tolerance):
+    """CUDA kernel for ICE normalization."""
+    i, j = cuda.grid(2)
+    if i < matrix.shape[0] and j < matrix.shape[1]:
+        for _ in range(max_iter):
+            old_bias = bias[i]
+            row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
+            col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
+            if row_sum != 0 and col_sum != 0:
+                bias[i] *= cp.sqrt(row_sum * col_sum)
+            else:
+                bias[i] = 1
+            if bias[i] != 0 and bias[j] != 0:
+                matrix[i, j] /= (bias[i] * bias[j])
+            else:
+                matrix[i, j] = 0
+            if abs(bias[i] - old_bias) < tolerance:
+                break
+
+@cuda.jit
+def _kr_normalization_kernel(matrix, bias, max_iter, tolerance):
+    """CUDA kernel for KR normalization."""
+    i, j = cuda.grid(2)
+    if i < matrix.shape[0] and j < matrix.shape[1]:
+        for _ in range(max_iter):
+            old_bias = bias[i]
+            row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
+            col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
+            if bias[i] != 0:
+                bias[i] *= cp.sqrt(row_sum * col_sum)
+            else:
+                bias[i] = 1
+            if bias[i] != 0 and bias[j] != 0:
+                matrix[i, j] = matrix[i, j] / (bias[i] * bias[j])
+            else:
+                matrix[i, j] = 0
+            if abs(bias[i] - old_bias) < tolerance:
+                break
+
+
+@cuda.jit
+def _pearson_distance_kernel(X, result):
+    i, j = cuda.grid(2)
+    if i < X.shape[0] and j < X.shape[0]:
+        if i != j:
+            mean_i = 0.0
+            mean_j = 0.0
+            for k in range(X.shape[1]):
+                mean_i += X[i, k]
+                mean_j += X[j, k]
+            mean_i /= X.shape[1]
+            mean_j /= X.shape[1]
+
+            numerator = 0.0
+            denom_i = 0.0
+            denom_j = 0.0
+            for k in range(X.shape[1]):
+                diff_i = X[i, k] - mean_i
+                diff_j = X[j, k] - mean_j
+                numerator += diff_i * diff_j
+                denom_i += diff_i * diff_i
+                denom_j += diff_j * diff_j
+
+            denominator = cp.sqrt(denom_i * denom_j)
+            if denominator != 0:
+                result[i, j] = 1 - (numerator / denominator)
+            else:
+                result[i, j] = 1.0  # Maximum distance when denominator is zero
 class ComputeHelpersGPU:
     """
     A class containing helper functions for various computational tasks related to HiC data analysis,
@@ -33,12 +99,12 @@ class ComputeHelpersGPU:
             'svd': self._svd_reduction,
             'tsne': self._tsne_reduction,
             'umap': self._umap_reduction,
-            'mds': self._mds_reduction
+            # 'mds': self._mds_reduction
         }
         
         self.clustering_methods = {
             'dbscan': self._dbscan_clustering,
-            'spectral': self._spectral_clustering,
+            # 'spectral': self._spectral_clustering,
             'kmeans': self._kmeans_clustering,
             'hierarchical': self._hierarchical_clustering,
             'optics': self._optics_clustering
@@ -172,11 +238,14 @@ class ComputeHelpersGPU:
 
     def pearson_distance(self, X: cp.array) -> cp.array:
         """Calculate Pearson correlation distance on GPU."""
-        mean = cp.mean(X, axis=1, keepdims=True)
-        std = cp.std(X, axis=1, keepdims=True)
-        normalized_X = self.safe_divide(X - mean, std)
-        corr = cp.dot(normalized_X, normalized_X.T) / X.shape[1]
-        return 1 - corr
+        result = cp.zeros((X.shape[0], X.shape[0]), dtype=cp.float32)
+        threads_per_block = (16, 16)
+        blocks_per_grid = (
+            (X.shape[0] + threads_per_block[0] - 1) // threads_per_block[0],
+            (X.shape[0] + threads_per_block[1] - 1) // threads_per_block[1]
+        )
+        _pearson_distance_kernel[blocks_per_grid, threads_per_block](X, result)
+        return result
 
     def spearman_distance(self, X: cp.array) -> cp.array:
         """Calculate Spearman correlation distance on GPU."""
@@ -216,25 +285,7 @@ class ComputeHelpersGPU:
         """Perform variance stabilizing normalization on GPU."""
         return self.safe_divide(m, m.sum(axis=1, keepdims=True))
 
-    @cuda.jit
-    def _ice_normalization_kernel(matrix, bias, max_iter, tolerance):
-        """CUDA kernel for ICE normalization."""
-        i, j = cuda.grid(2)
-        if i < matrix.shape[0] and j < matrix.shape[1]:
-            for _ in range(max_iter):
-                old_bias = bias[i]
-                row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
-                col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
-                if row_sum != 0 and col_sum != 0:
-                    bias[i] *= cp.sqrt(row_sum * col_sum)
-                else:
-                    bias[i] = 1
-                if bias[i] != 0 and bias[j] != 0:
-                    matrix[i, j] /= (bias[i] * bias[j])
-                else:
-                    matrix[i, j] = 0
-                if abs(bias[i] - old_bias) < tolerance:
-                    break
+
 
     def ice_normalization(self, matrix: cp.array, max_iter: int=100, tolerance: float=1e-5) -> cp.array:
         """Perform ICE normalization on GPU."""
@@ -247,29 +298,11 @@ class ComputeHelpersGPU:
         blockspergrid_y = (matrix.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
         
-        self._ice_normalization_kernel[blockspergrid, threadsperblock](matrix_balanced, bias, max_iter, tolerance)
+        _ice_normalization_kernel[blockspergrid, threadsperblock](matrix_balanced, bias, max_iter, tolerance)
         
         return matrix_balanced
 
-    @cuda.jit
-    def _kr_normalization_kernel(matrix, bias, max_iter, tolerance):
-        """CUDA kernel for KR normalization."""
-        i, j = cuda.grid(2)
-        if i < matrix.shape[0] and j < matrix.shape[1]:
-            for _ in range(max_iter):
-                old_bias = bias[i]
-                row_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[i, j])
-                col_sum = cuda.atomic.add(cuda.local.array(1, dtype=cp.float64), 0, matrix[j, i])
-                if bias[i] != 0:
-                    bias[i] *= cp.sqrt(row_sum * col_sum)
-                else:
-                    bias[i] = 1
-                if bias[i] != 0 and bias[j] != 0:
-                    matrix[i, j] = matrix[i, j] / (bias[i] * bias[j])
-                else:
-                    matrix[i, j] = 0
-                if abs(bias[i] - old_bias) < tolerance:
-                    break
+
 
     def kr_norm(self, matrix: cp.array, max_iter: int=100, tolerance: float=1e-5) -> cp.array:
         """Perform KR normalization on GPU."""
@@ -282,7 +315,7 @@ class ComputeHelpersGPU:
         blockspergrid_y = (matrix.shape[1] + threadsperblock[1] - 1) // threadsperblock[1]
         blockspergrid = (blockspergrid_x, blockspergrid_y)
         
-        self._kr_normalization_kernel[blockspergrid, threadsperblock](matrix_balanced, bias, max_iter, tolerance)
+        _kr_normalization_kernel[blockspergrid, threadsperblock](matrix_balanced, bias, max_iter, tolerance)
         
         return matrix_balanced
     
@@ -334,11 +367,11 @@ class ComputeHelpersGPU:
         result = umap_reducer.fit_transform(X)
         return result, None, None  # UMAP in cuML doesn't provide embedding_ and graph_
 
-    def _mds_reduction(self, X, n_components):
-        """Perform MDS reduction on GPU."""
-        mds = MDS(n_components=n_components)
-        result = mds.fit_transform(X)
-        return result, None, None  # MDS in cuML doesn't provide stress_ and dissimilarity_matrix_
+    # def _mds_reduction(self, X, n_components):
+    #     """Perform MDS reduction on GPU."""
+    #     mds = MDS(n_components=n_components)
+    #     result = mds.fit_transform(X)
+    #     return result, None, None  # MDS in cuML doesn't provide stress_ and dissimilarity_matrix_
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
@@ -374,14 +407,14 @@ class ComputeHelpersGPU:
             'n_iter': kmeans.n_iter_
         }
         
-    def _spectral_clustering(self, X, n_clusters, **kwargs):
-        """Perform Spectral clustering on GPU."""
-        spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components, **kwargs)
-        labels = spectral.fit_predict(X)
-        return labels, {
-            'affinity_matrix_': spectral.affinity_matrix_,
-            'n_features_in': spectral.n_features_in_
-        }
+    # def _spectral_clustering(self, X, n_clusters, **kwargs):
+    #     """Perform Spectral clustering on GPU."""
+    #     spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components, **kwargs)
+    #     labels = spectral.fit_predict(X)
+    #     return labels, {
+    #         'affinity_matrix_': spectral.affinity_matrix_,
+    #         'n_features_in': spectral.n_features_in_
+    #     }
 
 
     def _dbscan_clustering(self, X, eps, min_samples, **kwargs):

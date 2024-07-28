@@ -18,31 +18,37 @@ matplotlib = ">=3.7.0,<4.0.0"
 seaborn = "^0.12.0"
 umap-learn = "^0.5.4"
 kneed = "^0.8.1"
-pandas = "^2.0.0"
+pandas = ">=1.0.0"
 h5py = ">=2.0.0,<3.11.0"
+OpenMiChroM = "1.0.0"
+six = ">=1.14.0"
 
 [tool.poetry.extras]
 gpu = [
-    "cupy-cuda11x",
+    "cupy-cuda12x",
     "cudf",
     "cuml",
     "cugraph",
     "cuxfilter",
     "cuproj",
-    "ucxx"
+    "ucxx",
+    "ptxcompiler",
+    "cubinlinker"
 ]
 
 [tool.poetry.group.gpu]
 optional = true
 
 [tool.poetry.group.gpu.dependencies]
-cupy-cuda11x = "^12.0.0"
-cudf = "^24.0.0"
-cuml = "^24.0.0"
-cugraph = "^24.0.0"
-cuxfilter = "^24.0.0"
-cuproj = "^24.0.0"
+cupy-cuda11x = "^13.2.0"
+cudf = "^23.08"
+cuml = "^23.08"
+cugraph = "^23.08"
+cuxfilter = "^23.08"
+cuproj = "^23.08"
 ucxx = "^0.39.0"
+ptxcompiler = "^0.1.0"
+cubinlinker = "^0.1.0"
 
 [build-system]
 requires = ["poetry-core"]
