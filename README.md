@@ -48,8 +48,8 @@ To leverage GPU acceleration:
 3. Install RAPIDS Suite (follow instructions at https://docs.rapids.ai/install)
 
 ```bash
-conda create -n [envName] -c rapidsai -c conda-forge -c nvidia rapids=24.06 python=3.11 cuda-version=12.0
-conda activate [envName]
+mamba create -n [envName] -c rapidsai -c conda-forge -c nvidia rapids=24.06 python=3.11 cuda-version=12.0
+mamba activate [envName]
 # Navigate to the directory where the pyproject.toml is placed
 pip install .[gpu]
 ```

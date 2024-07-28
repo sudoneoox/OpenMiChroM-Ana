@@ -1,17 +1,14 @@
 import cupy as cp
 import numpy as np
 from numba import cuda
-from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN, SpectralClustering
-from cuml.metrics import silhouette_score, silhouette_samples
-from cuml.manifold import MDS
+from cuml import PCA, TruncatedSVD, TSNE, UMAP, KMeans, DBSCAN
+from sklearn.metrics import silhouette_score
+# from cuml.manifold import MDS
 from cupyx.scipy.sparse import csr_matrix
 from cupyx.scipy.spatial.distance import pdist
 import cudf
 from kneed import KneeLocator
 
-FILE_EXTENSION_MAP = {"ptx": "ptx"}
-import numba.cuda
-FILE_EXTENSION_MAP = numba.cuda.FILE_EXTENSION_MAP
 
 @cuda.jit
 def _ice_normalization_kernel(matrix, bias, max_iter, tolerance):
@@ -102,12 +99,12 @@ class ComputeHelpersGPU:
             'svd': self._svd_reduction,
             'tsne': self._tsne_reduction,
             'umap': self._umap_reduction,
-            'mds': self._mds_reduction
+            # 'mds': self._mds_reduction
         }
         
         self.clustering_methods = {
             'dbscan': self._dbscan_clustering,
-            'spectral': self._spectral_clustering,
+            # 'spectral': self._spectral_clustering,
             'kmeans': self._kmeans_clustering,
             'hierarchical': self._hierarchical_clustering,
             'optics': self._optics_clustering
@@ -370,11 +367,11 @@ class ComputeHelpersGPU:
         result = umap_reducer.fit_transform(X)
         return result, None, None  # UMAP in cuML doesn't provide embedding_ and graph_
 
-    def _mds_reduction(self, X, n_components):
-        """Perform MDS reduction on GPU."""
-        mds = MDS(n_components=n_components)
-        result = mds.fit_transform(X)
-        return result, None, None  # MDS in cuML doesn't provide stress_ and dissimilarity_matrix_
+    # def _mds_reduction(self, X, n_components):
+    #     """Perform MDS reduction on GPU."""
+    #     mds = MDS(n_components=n_components)
+    #     result = mds.fit_transform(X)
+    #     return result, None, None  # MDS in cuML doesn't provide stress_ and dissimilarity_matrix_
 
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
@@ -410,14 +407,14 @@ class ComputeHelpersGPU:
             'n_iter': kmeans.n_iter_
         }
         
-    def _spectral_clustering(self, X, n_clusters, **kwargs):
-        """Perform Spectral clustering on GPU."""
-        spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components, **kwargs)
-        labels = spectral.fit_predict(X)
-        return labels, {
-            'affinity_matrix_': spectral.affinity_matrix_,
-            'n_features_in': spectral.n_features_in_
-        }
+    # def _spectral_clustering(self, X, n_clusters, **kwargs):
+    #     """Perform Spectral clustering on GPU."""
+    #     spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components, **kwargs)
+    #     labels = spectral.fit_predict(X)
+    #     return labels, {
+    #         'affinity_matrix_': spectral.affinity_matrix_,
+    #         'n_features_in': spectral.n_features_in_
+    #     }
 
 
     def _dbscan_clustering(self, X, eps, min_samples, **kwargs):

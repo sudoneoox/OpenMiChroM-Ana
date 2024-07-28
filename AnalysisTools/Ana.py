@@ -80,7 +80,7 @@ class Ana:
         }
 
 
-    def process_trajectories(self, label: str, filename: str, folder_pattern: list = ['iteration_', [0, 100]]):
+    def process_trajectories(self, label: str, filename: str, folder_pattern: list = ['iteration_', [0, 100]], cache_trajs: bool = False):
         """
         Processes trajectory data for a given dataset.
 
@@ -88,12 +88,22 @@ class Ana:
             label (str): The label for the dataset.
             filename (str): The filename of the trajectory data (.cndb file).
             folder_pattern (list): The folder pattern for iterations.
+            cache_trajs (bool): saves the loaded cache_trajs in self.cache_path/{label}_trajs.npz
         """
         config = self.datasets[label]
         trajs_xyz = []
         it_start = folder_pattern[1][0]
         it_end = folder_pattern[1][1]
         inputFolder = os.path.join(config['folder'], folder_pattern[0])
+        cache_file = os.path.join(self.cache_path, f'{label}_trajs')
+
+        try:
+            cached_data = np.load(cache_file + ".npz", allow_pickle=True)
+            print(f"Using cached data: {cache_file}.npz")
+            self.datasets[label]['trajectories'] = cached_data['T']
+            return 
+        except FileNotFoundError:
+            print(f"No cached data, creating cache file {cache_file}")
 
         for i in range(it_start, it_end + 1):
             traj = self.__load_and_process_trajectory(folder=inputFolder, replica=i, filename=filename)
@@ -104,6 +114,9 @@ class Ana:
             max_shape = np.max([traj.shape for traj in trajs_xyz], axis=0)
             trajs_xyz = [self.compute_helpers.pad_array(traj, max_shape) if not np.array_equal(traj.shape, max_shape) else traj for traj in trajs_xyz]
             self.datasets[label]['trajectories'] = np.vstack(trajs_xyz)
+            if cache_trajs:
+                print(f"Saving trajectory cache to file {cache_file}.npz")
+                np.savez_compressed(cache_file, T=np.vstack(trajs_xyz))
             print(f'Trajectory for {label} has shape {self.datasets[label]["trajectories"].shape}')
         else:
             print(f"No valid trajectories found for {label}")
@@ -225,7 +238,7 @@ class Ana:
         
         
         pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components)
-        labels = np.repeat(np.arange(len(args)), [len(self.datasets[arg]['trajectories']) for arg in args]) #! TODO CHECK IMPLEMENTATION AND RESULTS TEST ON PCA FIRST 
+        labels = labels
         
         cumulative_variance = np.cumsum(explained_variance_ratio)
         
@@ -238,6 +251,7 @@ class Ana:
                 'outputFileName': f"{pcaPath}/pca_plot_{args}_{method}_{metric}_{norm}.png",
                 'logPath': logPath,
                 'plot_type': 'pcaplot',
+                'figsize':(12,8),
                 'labels': labels if labels.all() != [None] else args,  # Use provided labels or dataset names                
                 'cmap': 'viridis',
                 'title': f'PCA of {args}',
@@ -250,7 +264,7 @@ class Ana:
                 'metric': metric,
                 'norm': norm,
                 'n_components_95': n_components_95,
-                'size': 50,
+                'size': 65,
                 'alpha': 0.7,
                 'element_labels': labels
             }
@@ -316,7 +330,7 @@ class Ana:
             self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params=plot_param)
         return tsne_result, kl_divergence
 
-    def umap(self, *args: str, sample_size: int = 5000, n_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
+    def umap(self, *args: str, sample_size: int = 5000, n_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, labels: list = [None]) -> tuple:
         """
         Performs UMAP on the datasets and returns the UMAP results.
 
@@ -334,6 +348,7 @@ class Ana:
         """
         umapPath = os.path.join(self.outPath, 'UMAP')
         logPath = os.path.join(umapPath, f"{args}_log.txt")
+        labels = labels
 
         os.makedirs(umapPath, exist_ok=True)
         if n_clusters == -1:
@@ -354,11 +369,12 @@ class Ana:
                 'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}_{norm}.png'),
                 'logPath': logPath,
                 'plot_type': 'umapplot',
+                'labels': labels if labels != [None] else args, 
                 'cmap': 'viridis',
                 'embedding': embedding,
-                'title': f'UMAP of {args}',
+                'title': f'UMAP Projection of Chromatin Structures Across Cell Types',
                 'x_label': 'UMAP 1',
-                'y_label': 'UMAP 2' if n_components > 1 else 'Samples',
+                'y_label': 'UMAP 2',
                 'method': method,
                 'metric': metric,
                 'norm': norm,
@@ -672,7 +688,7 @@ class Ana:
 
 
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice') -> tuple:
+    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
         """
         Calculate and cache the distance matrix and linkage matrix for given datasets.
 
@@ -688,13 +704,25 @@ class Ana:
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         
+        if self.execution_mode.lower() == 'cuda':
+            return self.compute_helpers.calc_XZ(
+                datasets=self.datasets,
+                args=args,
+                cache_path=self.cache_path,
+                method=method,
+                metric=metric,
+                norm=norm,
+                overrideCache=overrideCache
+        )
+        
         # Try to load cached data
-        try:
-            cached_data = np.load(cache_file + ".npz", allow_pickle=True)
-            print(f"Using cached data: {cache_file}.npz")
-            return cached_data['X'], cached_data['Z']
-        except FileNotFoundError:
-            print(f"No cached data, creating cache file {cache_file}")
+        if overrideCache == False:
+            try:
+                cached_data = np.load(cache_file + ".npz", allow_pickle=True)
+                print(f"Using cached data: {cache_file}.npz")
+                return cached_data['X'], cached_data['Z']
+            except FileNotFoundError:
+                print(f"No cached data, creating cache file {cache_file}")
         
         flat_euclid_dist_map = {}
         max_shape = (0, 0)
@@ -807,7 +835,7 @@ class Ana:
         if mode.lower() == "gpu" or mode.lower() == "cuda":
             from AnalysisTools.CompHelperGPU import ComputeHelpersGPU
             self.compute_helpers = ComputeHelpersGPU(**params)
-            self.execution_mode == 'gpu'
+            self.execution_mode == 'cuda'
         elif mode.lower() == "cpu":
             self.compute_helpers = ComputeHelpersCPU(**params)
             self.execution_mode == 'cpu'

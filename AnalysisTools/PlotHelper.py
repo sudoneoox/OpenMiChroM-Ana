@@ -189,8 +189,7 @@ class PlotHelper:
         fig = plt.figure(figsize=params['figsize'])
 
         # Use a fixed colormap for the clusters
-        cmap = plt.cm.get_cmap('Set1')
-        colors = [cmap(i) for i in range(n_clusters)]
+        color_palette = sns.color_palette('colorblind', n_colors=n_clusters)
 
         
         kmeans = KMeans(n_clusters=params.get('n_clusters'), random_state=42)
@@ -202,23 +201,21 @@ class PlotHelper:
         fig = plt.figure(figsize=params['figsize'])
         
         if n_components == 1:
+
             ax = fig.add_subplot(111)
-            scatter = ax.scatter(range(len(result)), result[:, 0],
-                                c=cluster_labels,
-                                alpha=params['alpha'],
-                                s=params['size'],
-                                cmap='Set1')  # Use a discrete colormap
-            ax.set_xlabel('Index')
-            ax.set_ylabel(params['y_label'])
+            for i, label in enumerate(labels):
+                cluster_data = result[cluster_labels == i]
+                ax.scatter(range(len(cluster_data)), cluster_data[:, 0],
+                        c=[color_palette[i]], label=label,
+                        alpha=params['alpha'], s=params['size'])
         elif n_components == 2:
             ax = fig.add_subplot(111)
-            scatter = ax.scatter(result[:, 0], result[:, 1],
-                                c=range(len(result)),
-                                cmap='Set1',
-                                alpha=params['alpha'],
-                                s=params['size'])
-            ax.set_xlabel(params['x_label'])
-            ax.set_ylabel(params['y_label'])
+            for i, label in enumerate(labels):
+                    cluster_data = result[cluster_labels == i]
+                    ax.scatter(range(len(cluster_data)), cluster_data[:, 0],
+                            c=[color_palette[i]], label=label,
+                            alpha=params['alpha'], s=params['size'])
+            ax.grid(True, which='both', linestyle='--', linewidth=0.5)
         elif n_components == 3:
             ax = fig.add_subplot(111, projection='3d')
             scatter = ax.scatter(result[:, 0], result[:, 1], result[:, 2],
@@ -229,26 +226,20 @@ class PlotHelper:
             ax.set_xlabel(params['x_label'])
             ax.set_ylabel(params['y_label'])
             ax.set_zlabel(params['z_label'])
+    
+        ax.set_xlabel(params['x_label'], fontsize=14)
+        ax.set_ylabel(params['y_label'], fontsize=14)
 
         plt.title(params['title'])
         
-        # Add legend for clusters
-        legend_elements = [plt.Line2D([0], [0], marker='o', color='w', label=f'Cluster {i+1}',
-                                    markerfacecolor=scatter.cmap(scatter.norm(i)), markersize=10)
-                        for i in range(params.get('n_clusters'))]
-        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
 
-        # Add element labels
-        if len(labels) == n_clusters:
-            for i, label in enumerate(params['labels']):
-                if n_components == 1:
-                    ax.annotate(label, (i, result[i, 0]))
-                elif n_components == 2:
-                    ax.annotate(label, (result[i, 0], result[i, 1]))
-                elif n_components == 3:
-                    ax.text(result[i, 0], result[i, 1], result[i, 2], label)
+        legend = ax.legend(title="Cell Types", loc='upper left', fontsize=12, title_fontsize=12, frameon=True)
+        legend.get_frame().set_alpha(0.6) # make legend transparent
+        ax.set_xticks([])
+        ax.set_yticks([])
         
-        
+        plt.tight_layout()
+
         # Prepare additional info text
         additional_info_text = ""
         if plot_type == 'pcaplot':
@@ -274,10 +265,8 @@ class PlotHelper:
         if n_components_95 is not None:
             additional_info_text += f"\n\nComponents for 95% variance: {n_components_95}"
         
-        # Add additional info text to the right side of the plot
-        # plt.text(1.05, 0.5, additional_info_text, transform=ax.transAxes, verticalalignment='center')
+        # print additional info
         print(additional_info)
-        ax.set_xticks([])
 
         print(f"Dimensionality reduction plot created with {n_components} components")
         self._save_and_show(params)

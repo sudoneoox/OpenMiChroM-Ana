@@ -20,12 +20,12 @@ umap-learn = "^0.5.4"
 kneed = "^0.8.1"
 pandas = ">=1.0.0"
 h5py = ">=2.0.0,<3.11.0"
-OpenMiChroM = "=>1.0.0"
+OpenMiChroM = "1.0.0"
 six = ">=1.14.0"
 
 [tool.poetry.extras]
 gpu = [
-    "cupy-cuda11x",
+    "cupy-cuda12x",
     "cudf",
     "cuml",
     "cugraph",
