@@ -523,6 +523,7 @@ class ComputeHelpersGPU:
         """
         return [self.calc_dist(cp.array(val), metric) for val in trajectories]
     
+    
     def cached_calc_dist(self, trajectories, metric):
         """
         Calculates distance matrices on GPU (caching not implemented for GPU version).
@@ -555,6 +556,9 @@ class ComputeHelpersGPU:
     def getMemStats(self):
         """Get memory statistics (not applicable for GPU version)."""
         return None
+    
+    def getExecutionMode(self):
+        return "cuda"
     
     def setMem(self, path: str, verbose: int = 0):
         """Set memory location and verbosity (not applicable for GPU version)."""
@@ -613,6 +617,7 @@ class ComputeHelpersGPU:
     
     def safe_divide(self, a, b):
         return cp.divide(a, b, out=cp.zeros_like(a), where=b!=0)
+    
     
 
 

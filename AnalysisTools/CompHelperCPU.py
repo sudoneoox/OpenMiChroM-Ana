@@ -735,6 +735,8 @@ class ComputeHelpersCPU:
         
         return min(elbow, silhouette_optimal)
     
+    def getExecutionMode(self):
+        return "cpu"
     
 
     def getNormMethods(self):

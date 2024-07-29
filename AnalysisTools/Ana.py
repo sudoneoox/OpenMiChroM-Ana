@@ -121,38 +121,38 @@ class Ana:
         else:
             print(f"No valid trajectories found for {label}")
 
-        def __load_and_process_trajectory(self, folder: str, replica: int, filename: str, key: str = None) -> np.array:
-            """
-            Loads and processes a single trajectory file.
+    def __load_and_process_trajectory(self, folder: str, replica: int, filename: str, key: str = None) -> np.array:
+        """
+        Loads and processes a single trajectory file.
 
-            Args:
-                folder (str): The folder containing the trajectory file.
-                replica (int): The replica number.
-                filename (str): The filename of the trajectory data.
-                key (str, optional): Key for bead selection.
+        Args:
+            folder (str): The folder containing the trajectory file.
+            replica (int): The replica number.
+            filename (str): The filename of the trajectory data.
+            key (str, optional): Key for bead selection.
 
-            Returns:
-                np.array: Processed trajectory data.
-            """
-            path = f'{folder}{replica}/{filename}'
+        Returns:
+            np.array: Processed trajectory data.
+        """
+        path = f'{folder}{replica}/{filename}'
 
-            if not os.path.exists(path):
-                print(f"File does not exist: {path}")
-                return np.array([])
-            else:
-                print(f"Processing file: {path}")
+        if not os.path.exists(path):
+            print(f"File does not exist: {path}")
+            return np.array([])
+        else:
+            print(f"Processing file: {path}")
 
-            try:
-                trajectory = self.cndbTools.load(filename=path)
-                list_traj = [int(k) for k in trajectory.cndb.keys() if k != 'types']
-                list_traj.sort()
-                beadSelection = trajectory.dictChromSeq[key] if key else None
-                first_snapshot, last_snapshot = list_traj[0], list_traj[-1]
-                trajs_xyz = self.cndbTools.xyz(frames=[first_snapshot, last_snapshot + 1, 2000], XYZ=[0, 1, 2], beadSelection=beadSelection)
-                return trajs_xyz
-            except Exception as e:
-                print(f"Error processing trajectory {replica}: {str(e)}")
-                return np.array([])
+        try:
+            trajectory = self.cndbTools.load(filename=path)
+            list_traj = [int(k) for k in trajectory.cndb.keys() if k != 'types']
+            list_traj.sort()
+            beadSelection = trajectory.dictChromSeq[key] if key else None
+            first_snapshot, last_snapshot = list_traj[0], list_traj[-1]
+            trajs_xyz = self.cndbTools.xyz(frames=[first_snapshot, last_snapshot + 1, 2000], XYZ=[0, 1, 2], beadSelection=beadSelection)
+            return trajs_xyz
+        except Exception as e:
+            print(f"Error processing trajectory {replica}: {str(e)}")
+            return np.array([])
 
     """===================================== Analysis ===================================="""
 
@@ -727,7 +727,7 @@ class Ana:
         key = tuple(sorted(args)) + (method, metric, norm)
         cache_file = os.path.join(self.cache_path, f"cache_{key}.pkl")
         
-        if self.execution_mode.lower() == 'cuda':
+        if self.execution_mode.getExecutionMode() == 'cuda':
             return self.compute_helpers.calc_XZ(
                 datasets=self.datasets,
                 args=args,
