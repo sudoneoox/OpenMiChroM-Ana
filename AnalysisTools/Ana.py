@@ -121,38 +121,38 @@ class Ana:
         else:
             print(f"No valid trajectories found for {label}")
 
-    def __load_and_process_trajectory(self, folder: str, replica: int, filename: str, key: str = None) -> np.array:
-        """
-        Loads and processes a single trajectory file.
+        def __load_and_process_trajectory(self, folder: str, replica: int, filename: str, key: str = None) -> np.array:
+            """
+            Loads and processes a single trajectory file.
 
-        Args:
-            folder (str): The folder containing the trajectory file.
-            replica (int): The replica number.
-            filename (str): The filename of the trajectory data.
-            key (str, optional): Key for bead selection.
+            Args:
+                folder (str): The folder containing the trajectory file.
+                replica (int): The replica number.
+                filename (str): The filename of the trajectory data.
+                key (str, optional): Key for bead selection.
 
-        Returns:
-            np.array: Processed trajectory data.
-        """
-        path = f'{folder}{replica}/{filename}'
+            Returns:
+                np.array: Processed trajectory data.
+            """
+            path = f'{folder}{replica}/{filename}'
 
-        if not os.path.exists(path):
-            print(f"File does not exist: {path}")
-            return np.array([])
-        else:
-            print(f"Processing file: {path}")
+            if not os.path.exists(path):
+                print(f"File does not exist: {path}")
+                return np.array([])
+            else:
+                print(f"Processing file: {path}")
 
-        try:
-            trajectory = self.cndbTools.load(filename=path)
-            list_traj = [int(k) for k in trajectory.cndb.keys() if k != 'types']
-            list_traj.sort()
-            beadSelection = trajectory.dictChromSeq[key] if key else None
-            first_snapshot, last_snapshot = list_traj[0], list_traj[-1]
-            trajs_xyz = self.cndbTools.xyz(frames=[first_snapshot, last_snapshot + 1, 2000], XYZ=[0, 1, 2], beadSelection=beadSelection)
-            return trajs_xyz
-        except Exception as e:
-            print(f"Error processing trajectory {replica}: {str(e)}")
-            return np.array([])
+            try:
+                trajectory = self.cndbTools.load(filename=path)
+                list_traj = [int(k) for k in trajectory.cndb.keys() if k != 'types']
+                list_traj.sort()
+                beadSelection = trajectory.dictChromSeq[key] if key else None
+                first_snapshot, last_snapshot = list_traj[0], list_traj[-1]
+                trajs_xyz = self.cndbTools.xyz(frames=[first_snapshot, last_snapshot + 1, 2000], XYZ=[0, 1, 2], beadSelection=beadSelection)
+                return trajs_xyz
+            except Exception as e:
+                print(f"Error processing trajectory {replica}: {str(e)}")
+                return np.array([])
 
     """===================================== Analysis ===================================="""
 
@@ -179,38 +179,61 @@ class Ana:
         self.plot_helper.plot(plot_type="dendrogram", data=Z, plot_params=plot_params)
         return Z
 
-    def dist_map(self, label: str, method="euclidean") -> np.array:
-        """
-        Creates the Euclidean distance map for a given dataset.
-
+    def dist_map(self, label: str, metric="euclidean", norm=None, max_frames=None, linkage_method=None, size=5) -> np.array:
+        """_dist_map_
+        Creates the distance map for a given dataset using the specified metric, with optional normalization and linkage.
         Args:
-            label (str): Label of the dataset to create the Euclidean distance map for.
-
+        label (str): Label of the dataset to create the distance map for.
+        metric (str): The distance metric to use. Options: "euclidean", "contact", "pearson", "spearman", "log2_contact".
+        norm (str): Normalization method to apply after distance calculation.
+        linkage_method (str): Linkage method to apply after normalization. If None, no linkage is performed.
+        max_frames (int): Maximum number of frames to process (None for all frames).
         Returns:
-            np.array: The Euclidean distance map.
+        np.array: The distance map.
         """
-        trajectories = self.datasets[label]['trajectories']
+        try:
+            trajectories = self.datasets[label]['trajectories']
+            if trajectories is None or len(trajectories) == 0:
+                print(f"Trajectories not yet loaded for {label}. Load them first")
+                return np.array([])
 
-        if trajectories == None:
-            print(f"Trajectories not yet loaded for {label}. Load them first")
+            print(f"Processing {len(trajectories)} trajectories...")
+            
+            if max_frames is not None:
+                trajectories = trajectories[:max_frames]
+                print(f"Limited to {max_frames} frames.")
+
+            compute_dist = []
+            for i, val in enumerate(trajectories):
+                print(f"Processing frame {i+1}/{len(trajectories)}...")
+                dist = self.compute_helpers.calc_dist(val, metric)
+                if norm is not None:
+                    dist = self.compute_helpers.norm_distMatrix(dist, norm)
+                compute_dist.append(dist)
+
+            compute_dist = np.array(compute_dist)
+            print(f"Distance computation complete. Shape: {compute_dist.shape}")
+
+            linkage_result = None
+            if linkage_method is not None:
+                print(f"Performing linkage with method: {linkage_method}")
+                try:
+                    linkage_result = self.compute_helpers.perform_linkage(compute_dist, method=linkage_method) if linkage_method else None
+                    print("Linkage completed successfully.")
+                except Exception as e:
+                    print(f"Error in linkage: {str(e)}")
+            
+            if self.showPlots:
+                self.plot_helper.plot(plot_type='distmap', data=compute_dist,  plot_params={'method': linkage_method, 'norm':norm, 'metric':metric, 'label':label, 'outPath':self.outPath, 'size':int(size)} )
+
+            return compute_dist
+
+        except Exception as e:
+            print(f"An error occurred in dist_map: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return np.array([])
 
-        if self.datasets[label]["distance_array"] == None:
-            compute_dist = [cdist(val, val, method) for val in trajectories]
-            compute_dist = np.array(compute_dist)
-            self.datasets[label]['distance_array'] = compute_dist
-            
-        if self.showPlots:
-            plot_params = {
-                'outputFileName': os.path.join(self.outPath, f'{label}_dist_map.png'),
-                'cmap':'viridis',
-                'title': f'{label}',
-                'x_label': 'Beads',
-                'y_label': 'Beads'
-            }
-        self.plot_helper.plot(plot_type="euclidiandistmap", data=[self.datasets[label]["distance_array"]], plot_params=plot_params)
-
-        return self.datasets[label]['distance_array']
 
     def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 5, labels: list=[None]) -> tuple:       
         """

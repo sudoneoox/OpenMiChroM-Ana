@@ -157,26 +157,40 @@ class PlotHelper:
         print("Dendrogram created")
         self._save_and_show(params)
 
-    def _euclidiandistmap(self, data, params):
+    def _distmap(self, data, params):
         """
-        Create a Euclidean distance map.
-
+        Create a distance map.
         Args:
-            data (list): [distance_matrix] containing Euclidean distances.
-            params (dict): Plotting parameters.
-
+        data (list): [distance_matrix] containing distances.
+        params (dict): Plotting parameters.
         Returns:
-            None
+        None
         """
-        fig, ax = plt.subplots(1, 1, figsize=params['figsize'])
-        p = ax.imshow(data[0], vmin=params['vmin'], vmax=params['vmax'], cmap=params['cmap'])
-        plt.colorbar(p, ax=ax, fraction=params['fraction'])
-        plt.title(params['title'])
-        plt.xlabel(params['x_label'])
-        plt.ylabel(params['y_label'])
-        print(f"Euclidean distance map created with shape {data[0].shape}")
-        print(f"Min distance: {np.min(data[0]):.4f}, Max distance: {np.max(data[0]):.4f}")
-        self._save_and_show(params)
+        try:
+            n_maps = data.shape[0]
+            rows = int(np.ceil(np.sqrt(n_maps)))
+            cols = int(np.ceil(n_maps / rows))
+            fig, axes = plt.subplots(rows, cols, figsize=(params['size'] *cols, 4*rows))
+            axes = axes.flatten()
+            
+            for i in range(n_maps):
+                im = axes[i].imshow(data[i], cmap='Spectral_r')
+                axes[i].set_title(f'Frame {i+1}')
+                axes[i].set_xlabel('Beads')
+                axes[i].set_ylabel('Beads')
+                plt.colorbar(im, ax=axes[i], fraction=0.046)
+            
+            for i in range(n_maps, len(axes)):
+                axes[i].axis('off')
+            
+            plt.tight_layout()
+            norm_str = f"_{params['norm']}" if params['norm'] else "None"
+            method_str = f"_{params['method']}" if params['method'] else "None"
+            plt.savefig(os.path.join(params['outPath'], f'{params['label']}_dist_maps_{params['metric']}{norm_str}{method_str}.png'))
+            plt.show()
+            plt.close()
+        except Exception as e:
+            print(f"An error occurred while plotting: {str(e)}")
 
 
     def _dimensionality_reduction_plot(self, data, params):
@@ -189,7 +203,7 @@ class PlotHelper:
         fig = plt.figure(figsize=params['figsize'])
 
         # Use a fixed colormap for the clusters
-        color_palette = sns.color_palette('colorblind', n_colors=n_clusters)
+        color_palette = sns.color_palette('Spectral_r', n_colors=n_clusters)
 
         
         kmeans = KMeans(n_clusters=params.get('n_clusters'), random_state=42)
