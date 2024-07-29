@@ -767,3 +767,28 @@ class ComputeHelpersCPU:
     
     def getCpuCount(self):
         return self.n_jobs
+    
+    def perform_linkage(self, X, method='average'):
+        """
+        Perform linkage on the input data.
+        Args:
+        X (np.array): Input data for linkage.
+        method (str): Linkage method to use.
+        Returns:
+        np.array: Linkage matrix Z.
+        """
+        try:
+            from scipy.cluster.hierarchy import linkage
+            
+            # Flatten the 3D array to 2D for linkage
+            X_flat = X.reshape(-1, X.shape[-1])
+            
+            # Create a mask for finite values
+            finite_mask = np.isfinite(X_flat)
+            X_finite = X_flat[finite_mask.all(axis=1)]
+            
+            Z = linkage(X_finite, method=method, metric='euclidean')
+            return Z
+        except Exception as e:
+            print(f"Error in linkage: {str(e)}")
+            return None
