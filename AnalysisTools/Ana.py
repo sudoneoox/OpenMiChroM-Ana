@@ -235,7 +235,8 @@ class Ana:
             return np.array([])
 
 
-    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 5, labels: list=[None]) -> tuple:       
+    def pca(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', 
+            n_components: int = 2, n_clusters: int = 5, labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
         """
         Performs PCA on the datasets and returns the principal components and explained variance.
 
@@ -251,7 +252,6 @@ class Ana:
             tuple: (np.array, np.array, np.array) The principal components, the explained variance ratio, and the components.
         """
         pcaPath = os.path.join(self.outPath, 'PCA')
-        logPath = os.path.join(pcaPath, f"{args}_log.txt")
         os.makedirs(pcaPath, exist_ok=True)
                 
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
@@ -261,47 +261,27 @@ class Ana:
         
         
         pca_result, explained_variance_ratio, components = self.compute_helpers.run_reduction('pca', X, n_components)
-        labels = labels
-        
+                
         cumulative_variance = np.cumsum(explained_variance_ratio)
         
         n_components_95 = np.argmax(cumulative_variance >= 0.95) + 1
         
         print(f"n_components to reach 95% variance ratio {n_components_95}")
-        
         if self.showPlots:
-            plot_params = {
-                'outputFileName': f"{pcaPath}/pca_plot_{args}_{method}_{metric}_{norm}.png",
-                'logPath': logPath,
-                'plot_type': 'pcaplot',
-                'figsize':(12,8),
-                'labels': labels if labels.all() != [None] else args,  # Use provided labels or dataset names                
-                'cmap': 'viridis',
-                'title': f'PCA of {args}',
-                'x_label': 'PC1',
-                'y_label': 'PC2' if n_components > 1 else 'Principal Component 1',
-                'z_label': 'PC3' if n_components > 2 else None,
-                'n_components': n_components,
-                'n_clusters': n_clusters,
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'n_components_95': n_components_95,
-                'size': 65,
-                'alpha': 0.7,
-                'element_labels': labels
+            extra_params = {
+                'explained_variance_ratio': explained_variance_ratio,
+                'components': components,
+                'n_components_95': np.argmax(np.cumsum(explained_variance_ratio) >= 0.95) + 1,
             }
+            params = self.fetch_params('reduction', 'pca', args, method, metric, norm, None, 
+                                    n_clusters, n_components, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params=params)
+        
+        return pca_result, explained_variance_ratio, components
 
-            if n_components > 1:
-                plot_params['y_label'] = f'PC2 ({explained_variance_ratio[1]:.2%} variance)'
-            else:
-                plot_params['y_label'] = 'Samples'
-
-            self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params=plot_params)
-
-            return pca_result, explained_variance_ratio, components
-
-    def tsne(self, *args: str, sample_size: int = 5000, n_clusters: int = -1, n_components: int = 2, method: str = 'weighted', metric: str = "euclidean", norm: str = 'ice') -> tuple:
+    def tsne(self, *args: str, sample_size: int = 5000, n_clusters: int = 5, n_components: int = 2, 
+            method: str = 'weighted', metric: str = "euclidean", norm: str = 'ice', labels: list = None,
+            plot_params: dict = None, **kwargs) -> tuple:
         """
         Performs t-SNE on the datasets and returns the t-SNE results.
 
@@ -333,27 +313,18 @@ class Ana:
         print(f"n_components to reach 95% variance ratio {n_components_95}")
         
         if self.showPlots:
-            plot_param = {
-                'outputFileName': f'{tsnePath}/tsne_plot_{args}_{method}_{metric}_{norm}.png',
-                'cmap': 'viridis',
-                'plot_type': 'tsneplot',
-                'title': f't-SNE of {args}',
-                'x_label': 't-SNE 1',
-                'y_label': 't-SNE 2',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
+            extra_params = {
                 'kl_divergence': kl_divergence,
-                'sample_size': sample_size,
-                'n_clusters': n_clusters,
-                'n_components': n_components,
-                'size': 50,
-                'alpha': 0.7,
             }
-            self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params=plot_param)
+            params = self.fetch_params('reduction', 'tsne', args, method, metric, norm, sample_size, 
+                                    n_clusters, n_components, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params=params)
+        
         return tsne_result, kl_divergence
 
-    def umap(self, *args: str, sample_size: int = 5000, n_clusters: int = -1, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, labels: list = [None]) -> tuple:
+    def umap(self, *args: str, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', 
+            norm: str = 'ice', n_components: int = 2, n_clusters: int = 5, labels: list = None, 
+            plot_params: dict = None, **kwargs) -> tuple:
         """
         Performs UMAP on the datasets and returns the UMAP results.
 
@@ -370,13 +341,12 @@ class Ana:
             tuple: (np.array,) The UMAP results.
         """
         umapPath = os.path.join(self.outPath, 'UMAP')
-        logPath = os.path.join(umapPath, f"{args}_log.txt")
-        labels = labels
-
         os.makedirs(umapPath, exist_ok=True)
+        
         if n_clusters == -1:
             n_clusters = self.compute_helpers.find_optimal_clusters(X, 15)
         X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         umap_result, embedding, graph = self.compute_helpers.run_reduction('umap', X, n_components=n_components)
@@ -385,32 +355,19 @@ class Ana:
         cumulative_variance = np.cumsum(embedding)
         n_components_95 = np.argmax(cumulative_variance >= 0.95) + 1
         print(f"n_components to reach 95% variance ratio {n_components_95}")
-        
-        
+    
         if self.showPlots:
-            self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params={
-                'outputFileName': os.path.join(self.outPath, f'{umapPath}/umap_plot_{args}_{method}_{metric}_{norm}.png'),
-                'logPath': logPath,
-                'plot_type': 'umapplot',
-                'labels': labels if labels != [None] else args, 
-                'cmap': 'viridis',
-                'embedding': embedding,
-                'title': f'UMAP Projection of Chromatin Structures Across Cell Types',
-                'x_label': 'UMAP 1',
-                'y_label': 'UMAP 2',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'sample_size': sample_size,
-                'n_clusters': n_clusters,
-                'n_components': n_components,
-                'size': 50,
-                'alpha': 0.7,
-            })
+            extra_params = { 'embedding': embedding}
+            params = self.plot_helper.fetch_params(self.outPath, 'reduction', 'umap', args, method, metric, norm, sample_size, 
+                                    n_clusters, n_components, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params=params)
+        
         return umap_result, embedding, graph
     
     
-    def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 2) -> tuple:
+    def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', 
+            n_components: int = 2, n_clusters: int = 2, labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
+        svdPath = os.path.join(self.outPath, 'SVD')     
         """
         Performs Singular Value Decomposition (SVD) on the datasets.
 
@@ -430,31 +387,21 @@ class Ana:
         if n_components == -1:
             n_components = self.compute_helpers.find_optimal_clusters(X)
         svd_result, singular_values, vt = self.compute_helpers.run_reduction('svd', X, n_components)
-        
-        cumulative_variance = np.cumsum(singular_values)
-        n_components_95 = np.argmax(cumulative_variance >= 0.95) + 1
-        print(f"n_components to reach 95% variance ratio {n_components_95}")
-        
+            
         if self.showPlots:
-            self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params={
-                'outputFileName': f'{svdPath}/svd_plot_{args}_{method}_{metric}_{norm}.png',
-                'plot_type': 'svdplot',
-                'cmap': 'viridis',
-                'singular_values': singular_values,
-                'title': f'SVD of {args}',
-                'x_label': 'SVD 1',
-                'y_label': 'SVD 2' if n_components > 1 else 'Samples',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'n_clusters': n_clusters,
-                'n_components': n_components,
-                'size': 50,
-                'alpha': 0.7,
-            })
+                extra_params = {
+                    'singular_values': singular_values,
+                }
+                params = self.fetch_params('reduction', 'svd', args, method, metric, norm, None, 
+                                        n_clusters, n_components, labels, extra_params, plot_params)
+                self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params=params)
+            
         return svd_result, singular_values, vt
 
-    def mds(self, *args: str, mdsParams: dict = None, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, n_clusters: int = 2) -> tuple:
+    def mds(self, *args: str, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', 
+            norm: str = 'ice', n_components: int = 2, n_clusters: int = 2, labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
+        mdsPath = os.path.join(self.outPath, 'MDS')
+        os.makedirs(mdsPath, exist_ok=True) 
         """
         Performs Multidimensional Scaling (MDS) on the datasets.
 
@@ -485,28 +432,20 @@ class Ana:
         n_components_95 = np.argmax(cumulative_variance >= 0.95) + 1
         
         print(f"n_components to reach 95% variance ratio {n_components_95}")
+        
         if self.showPlots:
-            plot_param = {
-                'outputFileName': f'{mdsPath}/mds_plot_{args}_{method}_{metric}_{norm}.png',
-                'cmap': 'viridis',
-                'plot_type': 'mdsplot',
-                'title': f'MDS of {args}',
-                'x_label': 'MDS 1',
-                'y_label': 'MDS 2',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-                'stress':stress,
-                'sample_size': sample_size,
-                'n_clusters': n_clusters,
-                'n_components': n_components,
-                'size': 50,
-                'alpha': 0.7,
+            extra_params = {
+                'stress': stress,
             }
-            self.plot_helper.plot(plot_type="mdsplot", data=(mds_result, stress, dissimilarity_matrix), plot_params=plot_param)
+            params = self.fetch_params('reduction', 'mds', args, method, metric, norm, sample_size, 
+                                    n_clusters, n_components, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="mdsplot", data=(mds_result, stress, dissimilarity_matrix), plot_params=params)
+        
         return mds_result, stress, dissimilarity_matrix
     
-    def spectral_clustering(self, *args: str, spectralParams: dict = None, sample_size: int = 5000, n_clusters: int = 5, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2) -> tuple:
+    def spectral_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', 
+                            metric: str = 'euclidean', norm: str = 'ice', n_components: int = 2, labels: list = None, 
+                            plot_params: dict = None, **kwargs) -> tuple:
         """
         Performs spectral clustering on the datasets and returns the clustering results.
 
@@ -532,23 +471,20 @@ class Ana:
             print(f'found optimal clusters: {n_clusters}')
                 
         cluster_result, additional_info = self.compute_helpers.run_clustering('spectral', X, n_clusters=n_clusters, n_components=n_components, **spectralParams or {})
-        affinity_matrix = additional_info["affinity_matrix_"]
         if self.showPlots:
-            self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, cluster_result, additional_info], plot_params={
-                'outputFileName': os.path.join(spectralPath, f'spectral_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
-                'plot_type': 'spectral',
-                'affinity_matrix_': affinity_matrix,
-                'cmap':'viridis',
-                'title': f'Spectral Clustering of {args}',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-            })
+            extra_params = {
+                'affinity_matrix_': additional_info.get('affinity_matrix_'),
+            }
+            params = self.fetch_params('clustering', 'spectral', args, method, metric, norm, sample_size, 
+                                    n_clusters, n_components, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, cluster_result, additional_info], plot_params=params)
         
         return cluster_result, additional_info
     
     
-    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice',**kwargs) -> tuple:
+    def kmeans_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'weighted', 
+                        metric: str = 'euclidean', norm: str = 'ice', labels: list = None, 
+                        plot_params: dict = None, **kwargs) -> tuple:
         """
         Performs K-means clustering on the datasets.
 
@@ -574,22 +510,21 @@ class Ana:
             n_clusters = self.compute_helpers.find_optimal_clusters(X, 20)
         
         kmeans_result, additional_info = self.compute_helpers.run_clustering('kmeans', X, n_clusters=n_clusters, **kwargs)
-        inertia = additional_info['inertia']
         if self.showPlots:
-            self.plot_helper.plot(plot_type="kmeansclusteringplot", data=[X, kmeans_result, additional_info], plot_params={
-                'outputFileName': os.path.join(kmeansPath, f'kmeans_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
-                'plot_type': 'kmeans',
-                'cmap':'viridis',
-                'title': f'KMeans Clustering of {args}',
-                'inertia':inertia,
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-            })
+            extra_params = {
+                'inertia': additional_info.get('inertia'),
+            }
+            params = self.fetch_params('clustering', 'kmeans', args, method, metric, norm, sample_size, 
+                                    n_clusters, None, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="kmeansclusteringplot", data=[X, kmeans_result, additional_info], plot_params=params)
         
         return kmeans_result, additional_info
 
-    def dbscan_clustering(self, *args: str, eps: float = 0.5, min_samples: int = 5, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+    def dbscan_clustering(self, *args: str, eps: float = 0.5, min_samples: int = 5, sample_size: int = 5000, 
+                        method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', labels: list = None, 
+                        plot_params: dict = None, **kwargs) -> tuple:
+        dbscanPath = os.path.join(self.outPath, 'DBSCANClustering')
+        os.makedirs(dbscanPath, exist_ok=True)  
         """
         Performs DBSCAN clustering on the datasets.
 
@@ -613,22 +548,23 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        dbscan_result, additional_info = self.compute_helpers.run_clustering('dbscan', X, eps=eps, min_samples=min_samples, **kwargs)
+        dbscan_result, additional_info = self.compute_helpers.run_clustering('dbscan', X, eps=eps, method=method, min_samples=min_samples, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="clustering", data=[X, dbscan_result, additional_info], plot_params={
-                'outputFileName': os.path.join(dbscanPath, f'dbscan_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
-                'plot_type': 'dbscan',
-                'cmap':'viridis',
-                'title': f'DBSCAN Clustering of {args}',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-            })
+            extra_params = {
+                'eps': eps,
+                'min_samples': min_samples,
+            }
+            params = self.fetch_params('clustering', 'dbscan', args, method, metric, norm, sample_size, 
+                                    None, None, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="dbscanplot", data=[X, dbscan_result, additional_info], plot_params=params)
         
         return dbscan_result, additional_info
 
-    def hierarchical_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'ward', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+    def hierarchical_clustering(self, *args: str, n_clusters: int = 5, sample_size: int = 5000, method: str = 'ward', 
+                                metric: str = 'euclidean', norm: str = 'ice', labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
+        hierarchicalPath = os.path.join(self.outPath, 'HierarchicalClustering')
+        os.makedirs(hierarchicalPath, exist_ok=True) 
         """
         Performs hierarchical clustering on the datasets.
 
@@ -651,22 +587,23 @@ class Ana:
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
         
-        hierarchical_result, additional_info = self.compute_helpers.run_clustering('hierarchical', X, n_clusters=n_clusters, linkage_method=method, **kwargs)
+        hierarchical_result, additional_info = self.compute_helpers.run_clustering('hierarchical', X, n_clusters=n_clusters, method=method, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="clustering", data=[X, hierarchical_result, additional_info], plot_params={
-                'outputFileName': os.path.join(hierarchicalPath, f'hierarchical_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
-                'plot_type': 'hierarchical',
-                'cmap':'viridis',
-                'title': f'Hierarchical Clustering of {args}',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-            })
+            extra_params = {
+                'linkage_method': method,
+            }
+            params = self.fetch_params('clustering', 'hierarchical', args, method, metric, norm, sample_size, 
+                                    n_clusters, None, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="hierarchicalplot", data=[X, hierarchical_result, additional_info], plot_params=params)
         
         return hierarchical_result, additional_info
 
-    def optics_clustering(self, *args: str, min_samples: int = 5, xi: float = 0.05, min_cluster_size: float = 0.05, sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', **kwargs) -> tuple:
+    def optics_clustering(self, *args: str, min_samples: int = 5, xi: float = 0.05, min_cluster_size: float = 0.05, 
+                        sample_size: int = 5000, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', 
+                        labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
+        opticsPath = os.path.join(self.outPath, 'OPTICSClustering')
+        os.makedirs(opticsPath, exist_ok=True) 
         """
         Performs OPTICS clustering on the datasets.
 
@@ -694,15 +631,14 @@ class Ana:
         optics_result, additional_info = self.compute_helpers.run_clustering('optics', X, min_samples=min_samples, xi=xi, min_cluster_size=min_cluster_size, **kwargs)
         
         if self.showPlots:
-            self.plot_helper.plot(plot_type="clustering", data=[X, optics_result, additional_info], plot_params={
-                'outputFileName': os.path.join(opticsPath, f'optics_clustering_plot_{args}_{method}_{metric}_{norm}.png'),
-                'plot_type': 'optics',
-                'cmap':'viridis',
-                'title': f'OPTICS Clustering of {args}',
-                'method': method,
-                'metric': metric,
-                'norm': norm,
-            })
+            extra_params = {
+                'min_samples': min_samples,
+                'xi': xi,
+                'min_cluster_size': min_cluster_size,
+            }
+            params = self.fetch_params('clustering', 'optics', args, method, metric, norm, sample_size, 
+                                    None, None, labels, extra_params, plot_params)
+            self.plot_helper.plot(plot_type="opticsplot", data=[X, optics_result, additional_info], plot_params=params)
         
         return optics_result, additional_info
 
