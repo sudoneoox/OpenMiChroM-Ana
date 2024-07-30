@@ -199,16 +199,12 @@ class PlotHelper:
         plot_type = params.get("plot_type")
         labels = params.get('labels', [])
         n_clusters = params.get('n_clusters', 2)
+        clustering_method = params.get('cluster_method', 'kmeans')
+        clustering_params = params.get('clustering_params', {})
         scatter_plots = []        
 
         fig = plt.figure(figsize=params['figsize'])
-        
 
-        # if params.get('show_distribution', False):
-        #     fig = plt.figure(figsize=(params['figsize'][0] * 1.2, params['figsize'][1] * 1.2))
-        # else:
-        #     fig = plt.figure(figsize=params['figsize'])
-            
         # main scatter plot
         ax_main = fig.add_subplot(111)
         
@@ -219,11 +215,17 @@ class PlotHelper:
             ax_right = divider.append_axes("right", size="20%", pad=0.1)
 
         # Use a fixed colormap for the clusters
-        color_palette = sns.color_palette('Spectral_r', n_colors=n_clusters)
+        color_palette = sns.color_palette(params.get('color_palette', 'bright'), n_colors=n_clusters)
 
-        
-        kmeans = KMeans(n_clusters=params.get('n_clusters'), random_state=42)
-        cluster_labels = kmeans.fit_predict(result)
+        if clustering_method in self.compute_helpers.getClusteringMethods():
+            cluster_labels, clustering_info = self.compute_helpers.run_clustering(
+                method=clustering_method,
+                X=result,
+                n_clusters=n_clusters,
+                **clustering_params
+            )
+        else:
+            raise ValueError(f"Invalid clustering method: {clustering_method}. Avaliable clustering methods are: {self.compute_helpers.getClusteringMethods()}")
 
         # Perform clustering and evaluation
         _, evaluation_metrics = self.compute_helpers.evaluate_clustering(result, cluster_labels)
@@ -291,10 +293,13 @@ class PlotHelper:
             figLegend = plt.figure(figsize=(6, 7))
             ax_legend = figLegend.add_subplot(111)
             
-            for scatter in scatter_plots:
-                ax_legend.add_artist(scatter)
+            # Create new patches for the legend instead of reusing scatter plots
+            legend_elements = [plt.scatter([], [], c=[color_palette[i]], label=label, 
+                                        s=params['size'], alpha=params['alpha']) 
+                            for i, label in enumerate(labels)]
             
-            legend = ax_legend.legend(title="Cell Types", loc='center', fontsize=12, title_fontsize=12, frameon=True)
+            legend = ax_legend.legend(handles=legend_elements, title="Cell Types", 
+                                    loc='center', fontsize=12, title_fontsize=12, frameon=True)
             legend.get_frame().set_alpha(0.6)
             
             ax_legend.axis('off')
@@ -302,8 +307,8 @@ class PlotHelper:
             legend_path = params.get('outputFileName').rsplit('.', 1)[0] + '_legend.png'
             figLegend.savefig(legend_path, bbox_inches='tight', transparent=True)
             
-            plt.close(figLegend)  
-            
+            plt.close(figLegend)
+                
             
         ax_main.set_xticks([])
         ax_main.set_yticks([])
@@ -651,6 +656,9 @@ class PlotHelper:
                 'show_distribution': True,
                 'dist_y_scale': 2,
                 'show_legend_seperate': True,
+                'color_palette':'bright',
+                'clustering_method':'kmeans',
+                'clustering_params': {'randomState':47}
             })
         elif func_type == 'clustering':
             base_params.update({

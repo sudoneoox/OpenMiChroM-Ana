@@ -124,7 +124,8 @@ class ComputeHelpersCPU:
             'optics': self._optics_clustering,
             'hierarchical': self._hierarchical_clustering,
             'spectral': self._spectral_clustering,
-            'kmeans': self._kmeans_clustering
+            'kmeans': self._kmeans_clustering,
+            'iterative_kmeans': self._iterative_kmeans,
         }
         
         self.distance_metrics = {
@@ -549,22 +550,34 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Cluster labels.
         """
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_jobs=self.n_jobs, **kwargs)
-        labels = kmeans.fit_predict(X)
+        n_iterations = kwargs.get('n_iterations', 10)
+        kmeans = self._iterative_kmeans(X, n_clusters, n_iterations)
+        labels = kmeans.labels_
 
         def _calculate_inertia(k):
-            kmeans_k = KMeans(n_clusters=k, random_state=42, n_jobs=1)
+            kmeans_k = KMeans(n_clusters=k, random_state=42)
             kmeans_k.fit(X)
             return kmeans_k.inertia_
 
         with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-            inertias = list(executor.map(_calculate_inertia, range(1, n_clusters)))
+            inertias = list(executor.map(_calculate_inertia, range(1, n_clusters + 1)))
 
         return labels, {
             'inertia': inertias,
             'cluster_centers': kmeans.cluster_centers_,
-            'n_iter': kmeans.n_iter_
+            'n_iter': kmeans.n_iter_,
+            'best_inertia': kmeans.inertia_
         }
+        
+    def _iterative_kmeans(self, X: np.array, n_clusters:int, n_iterations: 5):
+        def run_kmeans():
+            kmeans = KMeans(n_clusters=n_clusters, random_state=None)
+            kmeans.fit(X)
+            return kmeans, kmeans.inertia_
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            results = list(executor.map(lambda _: run_kmeans(), range(n_iterations)))
+        best_kmeans, best_inertia = min(results, key=lambda x: x[1])
+        return best_kmeans        
 
     def _spectral_clustering(self, X: np.array, n_clusters: int, n_components: int, **kwargs):
         """
