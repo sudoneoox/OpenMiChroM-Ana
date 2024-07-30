@@ -199,8 +199,24 @@ class PlotHelper:
         plot_type = params.get("plot_type")
         labels = params.get('labels', [])
         n_clusters = params.get('n_clusters', 2)
+        scatter_plots = []        
 
         fig = plt.figure(figsize=params['figsize'])
+        
+
+        # if params.get('show_distribution', False):
+        #     fig = plt.figure(figsize=(params['figsize'][0] * 1.2, params['figsize'][1] * 1.2))
+        # else:
+        #     fig = plt.figure(figsize=params['figsize'])
+            
+        # main scatter plot
+        ax_main = fig.add_subplot(111)
+        
+        if params.get('show_distribution', False):
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            divider = make_axes_locatable(ax_main)
+            ax_top = divider.append_axes("top", size="20%", pad=0.1)
+            ax_right = divider.append_axes("right", size="20%", pad=0.1)
 
         # Use a fixed colormap for the clusters
         color_palette = sns.color_palette('Spectral_r', n_colors=n_clusters)
@@ -211,48 +227,95 @@ class PlotHelper:
 
         # Perform clustering and evaluation
         _, evaluation_metrics = self.compute_helpers.evaluate_clustering(result, cluster_labels)
-        
-        fig = plt.figure(figsize=params['figsize'])
-        
-        if n_components == 1:
-
-            ax = fig.add_subplot(111)
+                
+        if n_components == 1 or n_components == 2:
             for i, label in enumerate(labels):
                 cluster_data = result[cluster_labels == i]
-                ax.scatter(range(len(cluster_data)), cluster_data[:, 0],
+                scatter = ax_main.scatter(cluster_data[:, 0], cluster_data[:, 1],
                         c=[color_palette[i]], label=label,
                         alpha=params['alpha'], s=params['size'])
-        elif n_components == 2:
-            ax = fig.add_subplot(111)
-            for i, label in enumerate(labels):
-                    cluster_data = result[cluster_labels == i]
-                    ax.scatter(range(len(cluster_data)), cluster_data[:, 0],
-                            c=[color_palette[i]], label=label,
-                            alpha=params['alpha'], s=params['size'])
-            ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+            scatter_plots.append(scatter)
         elif n_components == 3:
-            ax = fig.add_subplot(111, projection='3d')
-            scatter = ax.scatter(result[:, 0], result[:, 1], result[:, 2],
+            ax_main = fig.add_subplot(111, projection='3d')
+            
+            scatter = ax_main.scatter(result[:, 0], result[:, 1], result[:, 2],
                                 c=cluster_labels,
                                 alpha=params['alpha'],
                                 s=params['size'],
                                 cmap='Set1')  # Use a discrete colormap
-            ax.set_xlabel(params['x_label'])
-            ax.set_ylabel(params['y_label'])
-            ax.set_zlabel(params['z_label'])
+            ax_main.set_xlabel(params['x_label'])
+            ax_main.set_ylabel(params['y_label'])
+            ax_main.set_zlabel(params['z_label'])
+            scatter_plots.append(scatter)
     
-        ax.set_xlabel(params['x_label'], fontsize=14)
-        ax.set_ylabel(params['y_label'], fontsize=14)
+        ax_main.set_xlabel(params['x_label'], fontsize=14)
+        ax_main.set_ylabel(params['y_label'], fontsize=14)
+    
+ 
+        if params.get('show_distribution', False):
+            for i, label in enumerate(labels):
+                cluster_data = result[cluster_labels == i]
+                sns.kdeplot(x=cluster_data[:, 0], ax=ax_top, fill=True, color=color_palette[i], label=label)
+                sns.kdeplot(y=cluster_data[:, 1], ax=ax_right, fill=True, color=color_palette[i])
+            
+            
+            dist_y_scale = params.get('dist_y_scale', 1.0)
+            ax_top.set_ylim(0, ax_top.get_ylim()[1] * dist_y_scale)
+            ax_right.set_xlim(0, ax_right.get_xlim()[1] * dist_y_scale)
 
-        plt.title(params['title'])
-        
+            ax_top.set_xlim(ax_main.get_xlim())
+            ax_right.set_ylim(ax_main.get_ylim())
+            
+            # Remove ticks, labels, and spines from distribution plots
+            for ax in [ax_top, ax_right]:
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.set_xlabel('')
+                ax.set_ylabel('')
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
+                    
+            fig.set_size_inches(params['figsize'][0], params['figsize'][1] * (1 + 0.2 * (1/dist_y_scale * 1.2)))
 
-        legend = ax.legend(title="Cell Types", loc='upper left', fontsize=12, title_fontsize=12, frameon=True)
-        legend.get_frame().set_alpha(0.6) # make legend transparent
-        ax.set_xticks([])
-        ax.set_yticks([])
+
+            # Align the limits of distribution plots with the main plot
+            ax_top.set_xlim(ax_main.get_xlim())
+            ax_right.set_ylim(ax_main.get_ylim())
+
+        legend = ax_main.legend(title="Cell Types", loc='upper left', fontsize=12, title_fontsize=12, frameon=True)
+        legend.get_frame().set_alpha(0.6)
+                
+        if params.get('show_legend_seperate', False):
+            ax_main.get_legend().remove()
+            
+            figLegend = plt.figure(figsize=(6, 7))
+            ax_legend = figLegend.add_subplot(111)
+            
+            for scatter in scatter_plots:
+                ax_legend.add_artist(scatter)
+            
+            legend = ax_legend.legend(title="Cell Types", loc='center', fontsize=12, title_fontsize=12, frameon=True)
+            legend.get_frame().set_alpha(0.6)
+            
+            ax_legend.axis('off')
+            
+            legend_path = params.get('outputFileName').rsplit('.', 1)[0] + '_legend.png'
+            figLegend.savefig(legend_path, bbox_inches='tight', transparent=True)
+            
+            plt.close(figLegend)  
+            
+            
+        ax_main.set_xticks([])
+        ax_main.set_yticks([])
+        fig.suptitle(params['title'])
+
         
         plt.tight_layout()
+        
+        plt.figure(fig.number)
+        plt.savefig(params['outputFileName'], bbox_inches='tight')
+        plt.show()
+        plt.close(fig)
 
         # Prepare additional info text
         additional_info_text = ""
@@ -283,7 +346,6 @@ class PlotHelper:
         print(additional_info)
 
         print(f"Dimensionality reduction plot created with {n_components} components")
-        self._save_and_show(params)
         
         # Prepare logging information
         log_info = f"""
@@ -562,10 +624,52 @@ class PlotHelper:
         plt.show()
         plt.close()
         
+    def fetch_params(self, outPath, func_type, func_name, args, method, metric, norm, sample_size, n_clusters, n_components, labels=None, extra_params=None, user_params=None):
+        base_params = {
+            'outputFileName': os.path.join(outPath, f'{func_name.upper()}/{func_name}_plot_{args}_{method}_{metric}_{norm}.png'),
+            'logPath': os.path.join(outPath, f'{func_name.upper()}/{func_name}_{args}_log.txt'),
+            'plot_type': f'{func_name}plot',
+            'cmap': 'viridis',
+            'title': f'{func_name.upper()} of {args}',
+            'method': method,
+            'metric': metric,
+            'norm': norm,
+            'sample_size': sample_size,
+            'n_clusters': n_clusters,
+            'n_components': n_components,
+            'size': 50,
+            'alpha': 0.7,
+            'labels': labels if labels is not None else args,
+        }
         
+        if func_type == 'reduction':
+            base_params.update({
+                'x_label': f'{func_name.upper()} 1',
+                'y_label': f'{func_name.upper()} 2',
+                'z_label': f'{func_name.upper()} 3' if n_components > 2 else None,
+                'figsize': (12, 8),
+                'show_distribution': True,
+                'dist_y_scale': 2,
+                'show_legend_seperate': True,
+            })
+        elif func_type == 'clustering':
+            base_params.update({
+                'x_label': 'Feature 1',
+                'y_label': 'Feature 2',
+            })
+        
+        if extra_params:
+            base_params.update(extra_params)
+        
+        if user_params:
+            base_params.update(user_params)
+        
+        return base_params
+            
     """======================================================== Getters / Setters ========================================================"""
     def getInitialParams(self):
         return self.default_params
+
     
     def setInitialParams(self, params: dict):
         for key in params:
