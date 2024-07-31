@@ -1,4 +1,5 @@
 import numpy as np
+import os
 from sklearn.preprocessing import normalize
 from scipy.spatial.distance import pdist, squareform
 from joblib import Parallel, delayed, Memory
@@ -8,7 +9,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.manifold import TSNE, MDS
 import umap.umap_ as umap
-from numba import jit, prange
+from numba import jit
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 
@@ -140,6 +141,13 @@ class ComputeHelpersCPU:
             'log_transform': self.log_transform,
             'vc': self.vc_normalization,
             'kr': self.kr_norm,
+        }
+        
+        self.preprocess_methods = {
+            'weighted': self._weighted_preprocessing,
+            'single': self._single_preprocessing,
+            'complete': self._complete_preprocessing,
+            'average': self._average_preprocessing
         }
 
     def set_n_jobs(self, n_jobs: int):
@@ -401,6 +409,72 @@ class ComputeHelpersCPU:
             np.array: Normalized contact matrix.
         """
         return _kr_norm_numba(matrix, max_iter, tolerance)
+    
+    '''#!========================================================== PREPROCESS METHODS ====================================================================================='''
+    def preprocess_X(self, X: np.array, method:str):
+        """
+        Preprocess the input array X based on the specified method.
+        This function uses parallel processing for efficiency.
+
+        Args:
+            X (np.array): Input array to preprocess.
+            method (str): Preprocessing method to apply.
+
+        Returns:
+            np.array: Preprocessed array.
+        """
+        if method not in self.preprocess_methods:
+            print(f"Warning: Unknown method '{method}'. No preprocessing applied.")
+            print (f"avalidable preprocessing methods: {self.getPreprocessMethods()}")
+            return X   
+        
+        preprocessor = self.preprocess_methods[method]
+        
+        # memory-mapped array for large datasets
+        if X.nbytes > 1e9: #if array bigger than 1GB
+            mm_filename = f'temp_mm_array_{np.random.randint(0, 1000000)}.npy'
+            mm_array = np.memmap(mm_filename, dtype=X.dtype, mode='w+', shape=X.shape)
+            mm_array[:] = X[:]
+            X = mm_array        
+        
+        chunk_size = max(1, len(X) // (self.n_jobs * 4))  # Ensure at least 1 item per chunk
+        
+                
+        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            futures = []
+            for i in range(0, len(X), chunk_size):
+                chunk = X[i:i+chunk_size]
+                futures.append(executor.submit(preprocessor, chunk))
+            
+            # Wait for all tasks to complete
+            for future in futures:
+                future.result()
+
+        if isinstance(X, np.memmap):
+            X.flush()
+            del X
+            X = np.memmap(mm_filename, dtype=X.dtype, mode='r')
+            os.remove(mm_filename)
+
+        return X
+
+    def _weighted_preprocessing(self, X: np.array) -> np.array:
+        """Weighted preprocessing method."""
+        return X  # No change for weighted method
+    
+    def _single_preprocessing(self, X: np.array) -> None:
+        """Single linkage preprocessing method."""
+        np.exp(-X / np.max(X), out=X)
+
+    def _complete_preprocessing(self, X: np.array) -> None:
+        """Complete linkage preprocessing method."""
+        np.divide(1, 1 + X, out=X)
+
+    def _average_preprocessing(self, X: np.array) -> None:
+        """Average linkage preprocessing method."""
+        X_min, X_max = np.min(X), np.max(X)
+        np.subtract(X, X_min, out=X)
+        np.divide(X, X_max - X_min, out=X)
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 
@@ -757,6 +831,10 @@ class ComputeHelpersCPU:
     def getDistanceMetrics(self):
         """Get the list of available distance metrics."""
         return list(self.distance_metrics)
+    
+    def getPreprocessMethods(self):
+        """Get the list of available preprocessing methods."""
+        return list(self.preprocess_methods)
     
     def getClusteringMethods(self):
         """Get the list of available clustering methods."""
