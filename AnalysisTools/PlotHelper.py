@@ -222,6 +222,7 @@ class PlotHelper:
                 method=clustering_method,
                 X=result,
                 n_clusters=n_clusters,
+                n_components=n_components,
                 **clustering_params
             )
         else:
@@ -305,7 +306,7 @@ class PlotHelper:
             ax_legend.axis('off')
             
             legend_path = params.get('outputFileName').rsplit('.', 1)[0] + '_legend.png'
-            figLegend.savefig(legend_path, bbox_inches='tight', transparent=True)
+            figLegend.savefig(legend_path, bbox_inches='tight', transparent=False)
             
             plt.close(figLegend)
                 
@@ -348,7 +349,7 @@ class PlotHelper:
             additional_info_text += f"\n\nComponents for 95% variance: {n_components_95}"
         
         # print additional info
-        print(additional_info)
+        # print(additional_info)
 
         print(f"Dimensionality reduction plot created with {n_components} components")
         
@@ -361,6 +362,7 @@ class PlotHelper:
             - Plot Type: {plot_type}
             - n_components: {n_components}
             - n_clusters: {params.get('n_clusters')}
+            - cluster_method: {params.get('cluster_method')}
             - method: {params.get('method')}
             - metric: {params.get('metric')}
             - norm: {params.get('norm')}
@@ -630,9 +632,11 @@ class PlotHelper:
         plt.close()
         
     def fetch_params(self, outPath, func_type, func_name, args, method, metric, norm, sample_size, n_clusters, n_components, labels=None, extra_params=None, user_params=None):
+        cluster_method_save = 'kmeans' if extra_params['cluster_method'] == 'kmeans' else extra_params['cluster_method']
+        
         base_params = {
-            'outputFileName': os.path.join(outPath, f'{func_name.upper()}/{func_name}_plot_{args}_{method}_{metric}_{norm}.png'),
-            'logPath': os.path.join(outPath, f'{func_name.upper()}/{func_name}_{args}_log.txt'),
+            'outputFileName': os.path.join(outPath, f'{func_name.upper()}/{func_name}_plot_{args}_{method}_{metric}_{norm}_{cluster_method_save}.png'),
+            'logPath': os.path.join(outPath, f'{func_name.upper()}/{func_name}_{args}_{cluster_method_save}_log.txt'),
             'plot_type': f'{func_name}plot',
             'cmap': 'viridis',
             'title': f'{func_name.upper()} of {args}',

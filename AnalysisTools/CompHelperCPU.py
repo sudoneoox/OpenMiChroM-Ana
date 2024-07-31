@@ -125,7 +125,6 @@ class ComputeHelpersCPU:
             'hierarchical': self._hierarchical_clustering,
             'spectral': self._spectral_clustering,
             'kmeans': self._kmeans_clustering,
-            'iterative_kmeans': self._iterative_kmeans,
         }
         
         self.distance_metrics = {
@@ -518,7 +517,7 @@ class ComputeHelpersCPU:
     
     '''#!========================================================== CLUSTERING METHODS ====================================================================================='''
 
-    def run_clustering(self, method, X, n_components:int = 0, n_clusters: int = 2, **kwargs):
+    def run_clustering(self, method, X, n_components:int = 2, n_clusters: int = 2, **kwargs):
         """
         Run the specified clustering method.
 
@@ -586,14 +585,13 @@ class ComputeHelpersCPU:
         Args:
             X (np.array): Input data.
             n_clusters (int): Number of clusters.
-            n_jobs (int): Number of jobs to run in parallel.
             **kwargs: Additional arguments for SpectralClustering.
 
         Returns:
             np.array: Cluster labels. dict: additional info.
         """
         from sklearn.cluster import SpectralClustering
-        spectral = SpectralClustering(n_clusters=n_clusters,n_components=n_components, **kwargs)
+        spectral = SpectralClustering(n_clusters=n_clusters, n_components=n_components)
         labels = spectral.fit_predict(X)
         return labels, {
             'affinity_matrix_': spectral.affinity_matrix_,
