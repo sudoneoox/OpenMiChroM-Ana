@@ -186,7 +186,7 @@ class PlotHelper:
             plt.tight_layout()
             norm_str = f"_{params['norm']}" if params['norm'] else "None"
             method_str = f"_{params['method']}" if params['method'] else "None"
-            plt.savefig(os.path.join(params['outPath'], f'{params['label']}_dist_maps_{params['metric']}{norm_str}{method_str}.png'))
+            plt.savefig(os.path.join(params['outPath'], f"{params['label']}_dist_maps_{params['metric']}{norm_str}{method_str}.png"))
             plt.show()
             plt.close()
         except Exception as e:
@@ -632,7 +632,7 @@ class PlotHelper:
         plt.close()
         
     def fetch_params(self, outPath, func_type, func_name, args, method, metric, norm, sample_size, n_clusters, n_components, labels=None, extra_params=None, user_params=None):
-        cluster_method_save = 'kmeans' if extra_params['cluster_method'] == 'kmeans' else extra_params['cluster_method']
+        cluster_method_save = 'kmeans' if user_params.get('cluster_method') == 'kmeans' else user_params.get('cluster_method')
         
         base_params = {
             'outputFileName': os.path.join(outPath, f'{func_name.upper()}/{func_name}_plot_{args}_{method}_{metric}_{norm}_{cluster_method_save}.png'),
