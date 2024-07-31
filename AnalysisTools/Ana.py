@@ -656,6 +656,7 @@ class Ana:
             method (str): The linkage method to use.
             metric (str): The distance metric to use.
             norm (str): The normalization method to use.
+            overrideCache (bool): option to not fetch from cache and recompute X,Z
 
         Returns:
             tuple: (X, Z) where X is the flattened distance array and Z is the linkage matrix.
@@ -711,8 +712,13 @@ class Ana:
                 # Replace NaNs with the mean of non-NaN values
                 dist[nan_mask] = np.nanmean(dist)
             
-            normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
+            if norm.lower() != 'none':
+                normalized_dist = np.array([self.compute_helpers.norm_distMatrix(matrix=matrix, norm=norm) for matrix in dist])
+            else:
+                normalized_dist = dist
+                
             flat_euclid_dist_map[label] = normalized_dist
+
             
             max_shape = np.maximum(max_shape, np.max([d.shape for d in normalized_dist], axis=0))
         
@@ -739,21 +745,26 @@ class Ana:
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
         
+        X = self.compute_helpers.preprocess_X(X, method)
         
         # Perform linkage
-        try:
-            Z = linkage(X, method=method, metric='euclidean')
-        except ValueError as e:
-            print(f"Error in linkage: {e}")
-            print("Attempting to proceed with available finite values...")
-            # Create a mask for finite values
-            finite_mask = np.isfinite(X)
-            X_finite = X[finite_mask]
-            Z = linkage(X_finite, method=method, metric='euclidean')
-        
+        if method.lower() == 'none':
+            try:
+                Z = linkage(X, method=method, metric='euclidean')
+            except ValueError as e:
+                print(f"Error in linkage: {e}")
+                print("Attempting to proceed with available finite values...")
+                # Create a mask for finite values
+                finite_mask = np.isfinite(X)
+                X_finite = X[finite_mask]
+                Z = linkage(X_finite, method=method, metric='euclidean')
+            
         # Cache the results
+        Z = np.array(1)
         np.savez_compressed(cache_file, X=X, Z=Z)
-        return X, Z
+        
+        # return X, Z
+        
     
     """ ============================================================= Getters/Setters ============================================================================================"""
 
