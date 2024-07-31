@@ -23,14 +23,14 @@ OpenMiChroM-Ana is a powerful Python package designed for comprehensive analysis
 - Visualization:
   * Rich set of plotting tools for result interpretation
   * Interactive visualizations for in-depth data exploration
-  * 
+  
 
 
 ## Installation
 ### System Requirements
 
 - Python 3.11 or higher
-- For GPU support: CUDA version 12.0 or higher
+- For GPU support: CUDA-Toolkit and CUDA version 12.0 or higher 
 
 ### CPU Version Installation
 
@@ -44,8 +44,8 @@ pip install .
 ### GPU Enabled Version
 To leverage GPU acceleration:
 1. Install CUDA Libraries (version 12.0 or higher)
-2. Set up conda or virtual env
-3. Install RAPIDS Suite (follow instructions at https://docs.rapids.ai/install)
+2. Set up micromamba env or virtual env
+3. Install RAPIDS Suite for CUDA ^12.0 (follow instructions at https://docs.rapids.ai/install)
 
 ```bash
 mamba create -n [envName] -c rapidsai -c conda-forge -c nvidia rapids=24.06 python=3.11 cuda-version=12.0
@@ -78,6 +78,9 @@ analysis.add_dataset(label="ExperimentB", folder="data/ExperimentB")
 # Process trajectory data
 analysis.process_trajectories(label="ExperimentA", filename="traj_A.cndb", folder_pattern=['iteration_', [1, 20]])
 analysis.process_trajectories(label="ExperimentB", filename="traj_B.cndb", folder_pattern=['iteration_', [1, 20]])
+
+#NOTE: to cache the trajectories to avoid recomputation do 
+# analysis.process_trajectories(label="ExpirementC" cache_trajs=True)
 
 # Perform dimensionality reduction
 pca_result = analysis.pca("ExperimentA", "ExperimentB", metric='euclidean', n_components=2, norm='ice', method='weighted')
