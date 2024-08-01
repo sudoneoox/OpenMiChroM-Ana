@@ -745,14 +745,14 @@ class Ana:
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
         
-        print(f"Preprocessing X with {method}")
-        X = self.compute_helpers.preprocess_X(X, method)
-        
-        # recheck after preprocessing x
-        non_finite_mask = ~np.isfinite(X)
-        if np.any(non_finite_mask):
-            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
-            X[non_finite_mask] = np.nanmean(X)
+        if method.lower() != 'none':
+            print(f"Preprocessing X with {method}")
+            X = self.compute_helpers.preprocess_X(X, method)
+            # recheck after preprocessing x
+            non_finite_mask = ~np.isfinite(X)
+            if np.any(non_finite_mask):
+                print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+                X[non_finite_mask] = np.nanmean(X)
         
         # Perform linkage
         if method.lower() == 'none':
