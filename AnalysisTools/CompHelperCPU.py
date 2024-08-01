@@ -411,10 +411,10 @@ class ComputeHelpersCPU:
         return _kr_norm_numba(matrix, max_iter, tolerance)
     
     '''#!========================================================== PREPROCESS METHODS ====================================================================================='''
-    def preprocess_X(self, X: np.array, method:str):
+    def preprocess_X(self, X: np.array, method: str) -> np.array:
         """
         Preprocess the input array X based on the specified method.
-        This function uses parallel processing for efficiency.
+        This function uses joblib for parallel processing and caching.
 
         Args:
             X (np.array): Input array to preprocess.
@@ -423,58 +423,48 @@ class ComputeHelpersCPU:
         Returns:
             np.array: Preprocessed array.
         """
+        return self._cached_preprocess_X(X, method)
+
+    @property
+    def _cached_preprocess_X(self):
+        return self.memory.cache(self._preprocess_X_wrapper)
+
+    def _preprocess_X_wrapper(self, X: np.array, method: str) -> np.array:
+
         if method not in self.preprocess_methods:
             print(f"Warning: Unknown method '{method}'. No preprocessing applied.")
-            print (f"avalidable preprocessing methods: {self.getPreprocessMethods()}")
-            return X   
-        
+            return X
+
         preprocessor = self.preprocess_methods[method]
         
-        # memory-mapped array for large datasets
-        if X.nbytes > 1e9: #if array bigger than 1GB
-            mm_filename = f'temp_mm_array_{np.random.randint(0, 1000000)}.npy'
-            mm_array = np.memmap(mm_filename, dtype=X.dtype, mode='w+', shape=X.shape)
-            mm_array[:] = X[:]
-            X = mm_array        
-        
-        chunk_size = max(1, len(X) // (self.n_jobs * 4))  # Ensure at least 1 item per chunk
-        
-                
-        with ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-            futures = []
-            for i in range(0, len(X), chunk_size):
-                chunk = X[i:i+chunk_size]
-                futures.append(executor.submit(preprocessor, chunk))
-            
-            # Wait for all tasks to complete
-            for future in futures:
-                future.result()
+        # Split X into chunks
+        chunk_size = max(1, len(X) // self.n_jobs)
+        X_chunks = [X[i:i+chunk_size] for i in range(0, len(X), chunk_size)]
 
-        if isinstance(X, np.memmap):
-            X.flush()
-            del X
-            X = np.memmap(mm_filename, dtype=X.dtype, mode='r')
-            os.remove(mm_filename)
+        # Process chunks in parallel
+        processed_chunks = Parallel(n_jobs=self.n_jobs)(
+            delayed(preprocessor)(chunk) for chunk in X_chunks
+        )
 
-        return X
+        # Combine processed chunks
+        return np.concatenate(processed_chunks)
 
     def _weighted_preprocessing(self, X: np.array) -> np.array:
-        """Weighted preprocessing method."""
-        return X  # No change for weighted method
-    
-    def _single_preprocessing(self, X: np.array) -> None:
+        """Weighted preprocessing method (no-op)."""
+        return X
+
+    def _single_preprocessing(self, X: np.array) -> np.array:
         """Single linkage preprocessing method."""
-        np.exp(-X / np.max(X), out=X)
+        return np.exp(-X / np.max(X))
 
-    def _complete_preprocessing(self, X: np.array) -> None:
+    def _complete_preprocessing(self, X: np.array) -> np.array:
         """Complete linkage preprocessing method."""
-        np.divide(1, 1 + X, out=X)
+        return 1 / (1 + X)
 
-    def _average_preprocessing(self, X: np.array) -> None:
+    def _average_preprocessing(self, X: np.array) -> np.array:
         """Average linkage preprocessing method."""
         X_min, X_max = np.min(X), np.max(X)
-        np.subtract(X, X_min, out=X)
-        np.divide(X, X_max - X_min, out=X)
+        return (X - X_min) / (X_max - X_min)
     
     '''#!========================================================== DIMENSIONALITY REDUCTION METHODS ====================================================================================='''
 

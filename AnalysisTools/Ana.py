@@ -345,10 +345,11 @@ class Ana:
         
         if n_clusters == -1:
             n_clusters = self.compute_helpers.find_optimal_clusters(X, 15)
-        X, Z = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
+        X, _ = self.calc_XZ(*args, method=method, metric=metric, norm=norm)
         
         if X.shape[0] > sample_size:
             X = resample(X, n_samples=sample_size, random_state=42)
+                       
         umap_result, embedding, graph = self.compute_helpers.run_reduction('umap', X, n_components=n_components)
         print(f"UMAP result shape: {umap_result.shape}")
                  
@@ -363,7 +364,6 @@ class Ana:
             self.plot_helper.plot(plot_type="umapplot", data=(umap_result, embedding, graph), plot_params=params)
         
         return umap_result, embedding, graph
-    
     
     def svd(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', 
             n_components: int = 2, n_clusters: int = 2, labels: list = None, plot_params: dict = None, **kwargs) -> tuple:
@@ -739,13 +739,20 @@ class Ana:
         X = np.vstack([item for sublist in flat_euclid_dist_map.values() for item in sublist])
         print(f"Flattened distance array has shape: {X.shape}")
         
-        # Final check for non-finite values
+        # check for non-finite values
         non_finite_mask = ~np.isfinite(X)
         if np.any(non_finite_mask):
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
         
+        print(f"Preprocessing X with {method}")
         X = self.compute_helpers.preprocess_X(X, method)
+        
+        # recheck after preprocessing x
+        non_finite_mask = ~np.isfinite(X)
+        if np.any(non_finite_mask):
+            print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
+            X[non_finite_mask] = np.nanmean(X)
         
         # Perform linkage
         if method.lower() == 'none':
@@ -763,7 +770,7 @@ class Ana:
         Z = np.array(1)
         np.savez_compressed(cache_file, X=X, Z=Z)
         
-        # return X, Z
+        return X, Z
         
     
     """ ============================================================= Getters/Setters ============================================================================================"""
