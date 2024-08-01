@@ -632,7 +632,7 @@ class PlotHelper:
         plt.close()
         
     def fetch_params(self, outPath, func_type, func_name, args, method, metric, norm, sample_size, n_clusters, n_components, labels=None, extra_params=None, user_params=None):
-        cluster_method_save = 'kmeans' if user_params.get('cluster_method') == 'kmeans' else user_params.get('cluster_method')
+        cluster_method_save = 'kmeans' if user_params.get('cluster_method', 'kmeans') == 'kmeans' else user_params.get('cluster_method')
         
         base_params = {
             'outputFileName': os.path.join(outPath, f'{func_name.upper()}/{func_name}_plot_{args}_{method}_{metric}_{norm}_{cluster_method_save}.png'),

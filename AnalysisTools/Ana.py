@@ -273,7 +273,7 @@ class Ana:
                 'components': components,
                 'n_components_95': np.argmax(np.cumsum(explained_variance_ratio) >= 0.95) + 1,
             }
-            params = self.fetch_params('reduction', 'pca', args, method, metric, norm, None, 
+            params = self.plot_helper.fetch_params(self.outPath, 'reduction', 'pca', args, method, metric, norm, None, 
                                     n_clusters, n_components, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="pcaplot", data=(pca_result, explained_variance_ratio, components), plot_params=params)
         
@@ -316,7 +316,7 @@ class Ana:
             extra_params = {
                 'kl_divergence': kl_divergence,
             }
-            params = self.fetch_params('reduction', 'tsne', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'reduction', 'tsne', args, method, metric, norm, sample_size, 
                                     n_clusters, n_components, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="tsneplot", data=(tsne_result, kl_divergence, None), plot_params=params)
         
@@ -392,7 +392,7 @@ class Ana:
                 extra_params = {
                     'singular_values': singular_values,
                 }
-                params = self.fetch_params('reduction', 'svd', args, method, metric, norm, None, 
+                params = self.plot_helper.fetch_params(self.outPath, 'reduction', 'svd', args, method, metric, norm, None, 
                                         n_clusters, n_components, labels, extra_params, plot_params)
                 self.plot_helper.plot(plot_type="svdplot", data=(svd_result, singular_values, vt), plot_params=params)
             
@@ -437,7 +437,7 @@ class Ana:
             extra_params = {
                 'stress': stress,
             }
-            params = self.fetch_params('reduction', 'mds', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'reduction', 'mds', args, method, metric, norm, sample_size, 
                                     n_clusters, n_components, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="mdsplot", data=(mds_result, stress, dissimilarity_matrix), plot_params=params)
         
@@ -475,7 +475,7 @@ class Ana:
             extra_params = {
                 'affinity_matrix_': additional_info.get('affinity_matrix_'),
             }
-            params = self.fetch_params('clustering', 'spectral', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'clustering', 'spectral', args, method, metric, norm, sample_size, 
                                     n_clusters, n_components, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="spectralclusteringplot", data=[X, cluster_result, additional_info], plot_params=params)
         
@@ -514,7 +514,7 @@ class Ana:
             extra_params = {
                 'inertia': additional_info.get('inertia'),
             }
-            params = self.fetch_params('clustering', 'kmeans', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'clustering', 'kmeans', args, method, metric, norm, sample_size, 
                                     n_clusters, None, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="kmeansclusteringplot", data=[X, kmeans_result, additional_info], plot_params=params)
         
@@ -555,7 +555,7 @@ class Ana:
                 'eps': eps,
                 'min_samples': min_samples,
             }
-            params = self.fetch_params('clustering', 'dbscan', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'clustering', 'dbscan', args, method, metric, norm, sample_size, 
                                     None, None, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="dbscanplot", data=[X, dbscan_result, additional_info], plot_params=params)
         
@@ -593,7 +593,7 @@ class Ana:
             extra_params = {
                 'linkage_method': method,
             }
-            params = self.fetch_params('clustering', 'hierarchical', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'clustering', 'hierarchical', args, method, metric, norm, sample_size, 
                                     n_clusters, None, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="hierarchicalplot", data=[X, hierarchical_result, additional_info], plot_params=params)
         
@@ -636,7 +636,7 @@ class Ana:
                 'xi': xi,
                 'min_cluster_size': min_cluster_size,
             }
-            params = self.fetch_params('clustering', 'optics', args, method, metric, norm, sample_size, 
+            params = self.plot_helper.fetch_params(self.outPath, 'clustering', 'optics', args, method, metric, norm, sample_size, 
                                     None, None, labels, extra_params, plot_params)
             self.plot_helper.plot(plot_type="opticsplot", data=[X, optics_result, additional_info], plot_params=params)
         
@@ -647,7 +647,7 @@ class Ana:
 
 
 
-    def calc_XZ(self, *args: str, method: str = 'weighted', metric: str = 'euclidean', norm: str = 'ice', overrideCache: bool = False) -> tuple:
+    def calc_XZ(self, *args: str, method: str = 'none', metric: str = 'euclidean', norm: str = 'none', overrideCache: bool = False) -> tuple:
         """
         Calculate and cache the distance matrix and linkage matrix for given datasets.
 
@@ -745,26 +745,26 @@ class Ana:
             print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
             X[non_finite_mask] = np.nanmean(X)
         
-        if method.lower() != 'none':
+        if method.lower() != 'none' or method.lower() != 'weighted':
             print(f"Preprocessing X with {method}")
             X = self.compute_helpers.preprocess_X(X, method)
             # recheck after preprocessing x
-            non_finite_mask = ~np.isfinite(X)
+            X = self.compute_helpers.preprocess_check(X)
             if np.any(non_finite_mask):
                 print("Warning: Non-finite values found in flattened distance array. Replacing with mean value.")
                 X[non_finite_mask] = np.nanmean(X)
         
         # Perform linkage
-        if method.lower() == 'none':
+        if method.lower() == 'remove':
             try:
-                Z = linkage(X, method=method, metric='euclidean')
+                Z = linkage(X, method='weighted', metric='euclidean')
             except ValueError as e:
                 print(f"Error in linkage: {e}")
                 print("Attempting to proceed with available finite values...")
                 # Create a mask for finite values
                 finite_mask = np.isfinite(X)
                 X_finite = X[finite_mask]
-                Z = linkage(X_finite, method=method, metric='euclidean')
+                Z = linkage(X_finite, method='weighted', metric='euclidean')
             
         # Cache the results
         Z = np.array(1)

@@ -873,3 +873,38 @@ class ComputeHelpersCPU:
         except Exception as e:
             print(f"Error in linkage: {str(e)}")
             return None
+        
+    def preprocess_check(self, X: np.array):
+        """
+        Preprocess data for UMAP by handling infinite, NaN, and extremely large values.
+        """
+        # Convert to float64 to handle larger range of values
+        X = X.astype(np.float64)
+
+        # Replace inf with nan
+        X[np.isinf(X)] = np.nan
+
+        # Get min and max of finite values
+        finite_mask = np.isfinite(X)
+        if np.any(finite_mask):
+            min_val = np.min(X[finite_mask])
+            max_val = np.max(X[finite_mask])
+        else:
+            print("Warning: No finite values found in the data.")
+            return np.zeros_like(X)  # Return zeros if no finite values
+
+        # Replace NaN with mean of finite values
+        nan_mask = np.isnan(X)
+        if np.any(nan_mask):
+            print(f"Warning: {np.sum(nan_mask)} NaN values encountered. Replacing with mean of finite values.")
+            X[nan_mask] = np.mean(X[finite_mask])
+
+        # Clip extremely large values
+        clip_min = min_val - 3 * np.std(X[finite_mask])
+        clip_max = max_val + 3 * np.std(X[finite_mask])
+        X = np.clip(X, clip_min, clip_max)
+
+        # Normalize to [0, 1] range
+        X = (X - np.min(X)) / (np.max(X) - np.min(X))
+
+        return X
